@@ -406,11 +406,16 @@ async def build_and_run_graph(payload: dict = Body(...)):
     token_tracker = TokenUsageTracker(log_stream)
 
     try:
-        # Determine Provider - only OpenRouter and LlamaCpp supported
+        # Determine Provider - OpenRouter, Requesty (OpenAI-compatible cloud) and LlamaCpp supported
         # Settings / env provide defaults; request params override (backward compatible).
         cfg = get_settings()
         provider = params.get("provider", cfg.default_provider) or cfg.default_provider
         api_key = params.get("api_key", "") or cfg.resolved_api_key() or ""
+
+        # Base URL for the selected OpenAI-compatible cloud provider (OpenRouter / Requesty)
+        cloud_api_base = (
+            "https://router.requesty.ai/v1" if provider == "requesty" else cfg.openrouter_base_url
+        )
 
         # Hoist common config and model choices for per-agent / synthesis support (visible in all branches)
         openrouter_model = params.get("openrouter_model", cfg.openrouter_model)
@@ -422,7 +427,9 @@ async def build_and_run_graph(payload: dict = Body(...)):
             params.get("llamacpp_api_key", cfg.llamacpp_api_key) or cfg.llamacpp_api_key
         )
 
-        default_agent_model = openrouter_model if provider == "openrouter" else llamacpp_model
+        default_agent_model = (
+            openrouter_model if provider in ("openrouter", "requesty") else llamacpp_model
+        )
 
         synthesis_model = params.get("synthesis_model", "").strip()
         agent_models_raw = params.get("agent_models", "").strip()
@@ -454,33 +461,37 @@ async def build_and_run_graph(payload: dict = Body(...)):
             synthesis_llm = CoderMockLLM()
             await log_stream.put("--- ⚠️ Debug Mode: Embeddings skipped. RAG will be skipped. ---")
 
-        elif provider == "openrouter":
+        elif provider in ("openrouter", "requesty"):
+            provider_label = "Requesty" if provider == "requesty" else "OpenRouter"
             if not api_key:
                 return JSONResponse(
-                    content={"message": "OpenRouter API Key required"}, status_code=400
+                    content={"message": f"{provider_label} API Key required"},
+                    status_code=400,
                 )
             # use hoisted openrouter_model as default for agents
             default_agent_model = openrouter_model
             llm = ChatOpenAI(
                 model=default_agent_model,
                 openai_api_key=api_key,
-                openai_api_base=cfg.openrouter_base_url,
+                openai_api_base=cloud_api_base,
                 temperature=cfg.temperature,
                 callbacks=[token_tracker],
             )
-            # Use OpenAIEmbeddings with OpenRouter base URL (works for many OpenRouter embedding models)
+            # Use OpenAIEmbeddings with the cloud provider base URL (works for many embedding models)
             try:
                 OpenAIEmbeddings(
                     model=cfg.openrouter_embedding_model,
                     openai_api_key=api_key,
-                    openai_api_base=cfg.openrouter_base_url,
+                    openai_api_base=cloud_api_base,
                     check_embedding_ctx_length=False,
                 )
                 await log_stream.put(
-                    f"--- Initializing Main Agent LLM: OpenRouter ({default_agent_model}) & Embeddings ---"
+                    f"--- Initializing Main Agent LLM: {provider_label} ({default_agent_model}) & Embeddings ---"
                 )
             except Exception as e:
-                await log_stream.put(f"WARNING: Failed to initialize OpenRouter embeddings: {e}")
+                await log_stream.put(
+                    f"WARNING: Failed to initialize {provider_label} embeddings: {e}"
+                )
 
             # Create synthesis LLM if user specified a different model for synthesis
             synthesis_llm = llm
@@ -489,7 +500,7 @@ async def build_and_run_graph(payload: dict = Body(...)):
                     synthesis_llm = ChatOpenAI(
                         model=synthesis_model,
                         openai_api_key=api_key,
-                        openai_api_base=cfg.openrouter_base_url,
+                        openai_api_base=cloud_api_base,
                         temperature=cfg.temperature,
                         callbacks=[token_tracker],
                     )
@@ -548,7 +559,9 @@ async def build_and_run_graph(payload: dict = Body(...)):
 
         else:
             return JSONResponse(
-                content={"message": "Invalid provider. Please select openrouter or llamacpp."},
+                content={
+                    "message": "Invalid provider. Please select openrouter, requesty or llamacpp."
+                },
                 status_code=400,
             )
 
@@ -1491,6 +1504,13 @@ async def start_distillation(payload: dict = Body(...)):
     provider = payload.get("provider", "openrouter")
     api_key = payload.get("api_key", "")
 
+    # Base URL for the selected OpenAI-compatible cloud provider (OpenRouter / Requesty)
+    cloud_api_base = (
+        "https://router.requesty.ai/v1"
+        if provider == "requesty"
+        else "https://openrouter.ai/api/v1"
+    )
+
     await log_stream.put(
         f"--- ⚗️ DISTILLATION: Initializing (provider: {provider}, debug: {debug_mode}) ---"
     )
@@ -1504,22 +1524,23 @@ async def start_distillation(payload: dict = Body(...)):
             distil_model = (
                 payload.get("synthesis_model", "").strip()
                 or payload.get("openrouter_model", "stepfun/step-3.5-flash:free")
-                if provider == "openrouter"
+                if provider in ("openrouter", "requesty")
                 else payload.get("llamacpp_model", "llama-3.2-1b-instruct")
             )
-            if provider == "openrouter":
+            if provider in ("openrouter", "requesty"):
+                provider_label = "Requesty" if provider == "requesty" else "OpenRouter"
                 if not api_key:
                     return JSONResponse(
-                        content={"message": "OpenRouter API Key required"},
+                        content={"message": f"{provider_label} API Key required"},
                         status_code=400,
                     )
                 llm = ChatOpenAI(
                     model=distil_model,
                     openai_api_key=api_key,
-                    openai_api_base="https://openrouter.ai/api/v1",
+                    openai_api_base=cloud_api_base,
                     temperature=0.7,
                 )
-                await log_stream.put(f"--- Distillation LLM: OpenRouter ({distil_model}) ---")
+                await log_stream.put(f"--- Distillation LLM: {provider_label} ({distil_model}) ---")
             elif provider == "llamacpp":
                 llamacpp_url = payload.get("llamacpp_url", "http://localhost:8080/v1")
                 llamacpp_url = llamacpp_url.rstrip("/")
@@ -1536,7 +1557,9 @@ async def start_distillation(payload: dict = Body(...)):
                 await log_stream.put(f"--- Distillation LLM: LlamaCpp ({llamacpp_url}) ---")
             else:
                 return JSONResponse(
-                    content={"message": "Invalid provider. Please select openrouter or llamacpp."},
+                    content={
+                        "message": "Invalid provider. Please select openrouter, requesty or llamacpp."
+                    },
                     status_code=400,
                 )
     except Exception as e:

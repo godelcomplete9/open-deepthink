@@ -199,7 +199,7 @@ These artifacts are the real product. The final synthesized answer is a byproduc
 
 - Built on **LangGraph** with cyclic graphs, parallel layers, and shared library engines for the UI, CLI, and skills.
 - Phase test suite + control-flow tests (`python tests/run_all.py`) with mock LLMs — no API keys. Includes a free **structural eval** (`deepthink eval`).
-- Clean provider model: only OpenRouter (cloud) and LlamaCpp / llama.cpp server (local).
+- Clean provider model: OpenRouter and Requesty (OpenAI-compatible cloud) and LlamaCpp / llama.cpp server (local).
 - Robust JSON handling, token tracking, streaming logs, RAPTOR indexing, AST+subprocess sandbox, disk-backed sessions, and a pre-run **cost estimator**.
 - Real export/import of QNN state. One `GraphState` (library = web).
 - Manual mode can grow large if you pass `--yes`; auto mode caps at 24 agents. Estimate first.
@@ -313,7 +313,7 @@ open-deepthink                   # or: deepthink serve  |  python -m deepthink
 
 Open http://127.0.0.1:8000.
 
-**Supported providers**: OpenRouter (bring your own key) and LlamaCpp / llama.cpp server (local).
+**Supported providers**: OpenRouter and Requesty (bring your own key) and LlamaCpp / llama.cpp server (local).
 
 ### Docker
 
