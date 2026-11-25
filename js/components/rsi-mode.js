@@ -229,7 +229,10 @@ const RsiMode = (() => {
         }
         report = result.artifact_code || '';
         reportName = (result.artifact_path || 'rsi_report.md').split(/[\\/]/).pop();
-        $('rsi-report').innerHTML = (window.marked && marked.parse) ? marked.parse(report) : `<pre>${esc(report)}</pre>`;
+        // The report quotes policy text and model output: never inject it unsanitised.
+        $('rsi-report').innerHTML = (window.marked && marked.parse && window.DOMPurify)
+            ? DOMPurify.sanitize(marked.parse(report))
+            : `<pre>${esc(report)}</pre>`;
         $('rsi-download-btn').disabled = !report;
         if (result.snapshot) renderLists(result.snapshot);
         showPane((result.findings || []).length ? 'findings' : 'controls');

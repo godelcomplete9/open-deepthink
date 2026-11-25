@@ -144,7 +144,10 @@ def train(cfg: LoraConfig, state: LoraState, run_id: str) -> dict[str, Any]:
         return {"ran": False, "reason": "no trainer configured (RSI_LORA_TRAIN_CMD)"}
     if state.examples < cfg.min_examples:
         return {"ran": False, "reason": f"{state.examples} < {cfg.min_examples} examples"}
-    cmd = cfg.train_cmd.format(dataset=state.dataset_path, out_dir=cfg.out_dir, run_id=run_id)
+    try:
+        cmd = cfg.train_cmd.format(dataset=state.dataset_path, out_dir=cfg.out_dir, run_id=run_id)
+    except (KeyError, IndexError, ValueError) as e:
+        return {"ran": False, "reason": f"bad RSI_LORA_TRAIN_CMD template: {e!r}"}
     try:
         proc = subprocess.run(  # noqa: S603 - operator-configured command, shell=False
             shlex.split(cmd, posix=os.name != "nt"),

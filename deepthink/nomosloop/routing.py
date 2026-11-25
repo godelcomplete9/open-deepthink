@@ -100,17 +100,37 @@ def llm_endpoint(llm: Any) -> str | None:
         val = getattr(llm, attr, None)
         if val:
             return str(val)
-    client = getattr(llm, "client", None)
-    val = getattr(client, "base_url", None) if client is not None else None
-    return str(val) if val else None
+    for attr in ("root_client", "client", "async_client"):
+        client = getattr(llm, attr, None)
+        for c in (client, getattr(client, "_client", None)):
+            val = getattr(c, "base_url", None) if c is not None else None
+            if val:
+                return str(val)
+    return None
+
+
+_NETWORK_ATTRS = (
+    "root_client",
+    "client",
+    "async_client",
+    "openai_api_key",
+    "api_key",
+    "anthropic_api_key",
+)
 
 
 def is_local_llm(llm: Any) -> bool:
-    """A driver is local if it runs in-process or talks to a local/private host."""
+    """A driver is local if it runs in-process or talks to a local/private host.
+
+    A model with a network client whose endpoint cannot be read is treated as
+    remote: the rule fails closed.
+    """
     if llm is None:
         return True
     url = llm_endpoint(llm)
-    return True if url is None else is_local_url(url)
+    if url is not None:
+        return is_local_url(url)
+    return not any(getattr(llm, a, None) is not None for a in _NETWORK_ATTRS)
 
 
 def load_dotenv(path: str = ".env") -> bool:

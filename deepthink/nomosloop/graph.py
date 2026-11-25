@@ -591,6 +591,7 @@ def lora_node(state: NomosState) -> dict[str, Any]:
 
 def artifact_emit_node(state: NomosState) -> dict[str, Any]:
     world = _world(state)
+    world.adopt_pending(dict(state.get("scale_lattice", {})))
     text = security_report(state, world)
     path = state.get("artifact_path") or f"artifacts/rsi_{state.get('run_id', 'run-x')}.md"
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)

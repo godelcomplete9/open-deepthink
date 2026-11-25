@@ -522,7 +522,7 @@ def next_rank(
         and supp == 8
         and a.L < 0.02
         and a.x >= 1
-        and a.own_intake >= p.c * a.emitted * p.h
+        and a.own_intake >= p.c * a.emitted
         and a.cls not in ("E", "T")
         and not pure
     ):

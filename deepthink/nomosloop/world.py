@@ -653,6 +653,33 @@ class World:
         for k in range(4):
             E[k] = max(0.0, E[k] - amount * E[k] / tot)
 
+    def adopt_pending(self, lattice: dict[str, Any]) -> int:
+        """Instantiate controls kept after the last correspond (pr from their payer)."""
+        born = 0
+        for lv in lattice.get("levels", []) or []:
+            lid = str(lv.get("level_id"))
+            for r in lv.get("rules", []) or []:
+                ref = f"pol/{lid}/{r.get('id')}"
+                parent = self.agents.get(self.pending_parent.get(ref, ""))
+                if parent is None:
+                    continue
+                self.pending_parent.pop(ref, None)
+                node = tc.AXNode(
+                    ref,
+                    "rule",
+                    f"{r.get('name', '')}: {r.get('pattern', '')} => {r.get('rewrite', '')}",
+                    {"level": lid},
+                )
+                self.ax[ref] = node
+                self.ax_edges.append((ref, f"pol/{lid}#mod", 0.0))
+                self._instantiate(
+                    node, tc.offline_row(node), "offline-lexicon", operator=parent.id, parent=parent
+                )
+                born += 1
+        if born:
+            self._rebuild_edges()
+        return born
+
     # ------------------------------------------------------------ coverage
     def _coverage(self) -> None:
         p = self.params

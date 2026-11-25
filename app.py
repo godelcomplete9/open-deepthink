@@ -1786,13 +1786,16 @@ async def start_rsi(payload: dict = Body(...)):
         mutators = max(0, min(16, int(payload.get("mutators", 8))))
         ticks = max(1, min(10, int(payload.get("ticks", 3))))
         lambda_am = max(0.0, min(1.0, float(payload.get("lambda_am", 0.7))))
+        sens_in = payload.get("sensitivity") or {}
+        lora_in = payload.get("lora") or {}
+        if not isinstance(sens_in, dict) or not isinstance(lora_in, dict):
+            raise TypeError("sensitivity and lora must be objects")
         sens = {}
         for k, (lo, hi) in _RSI_SENSITIVITY.items():
-            if (payload.get("sensitivity") or {}).get(k) is not None:
-                sens[k] = max(lo, min(hi, float(payload["sensitivity"][k])))
+            if sens_in.get(k) is not None:
+                sens[k] = max(lo, min(hi, float(sens_in[k])))
         arc = payload.get("mapper_arc_agi2")
         arc = None if arc in (None, "") else max(0.0, min(100.0, float(arc)))
-        lora_in = payload.get("lora") or {}
         lora = {
             "enabled": bool(lora_in.get("enabled")),
             "adapter_id": max(0, min(64, int(lora_in.get("adapter_id", 0)))),
@@ -1801,7 +1804,7 @@ async def start_rsi(payload: dict = Body(...)):
             "train_cmd": get_settings().rsi_lora_train_cmd,
         }
     except (TypeError, ValueError):
-        return JSONResponse(status_code=400, content={"message": "Invalid numeric parameter."})
+        return JSONResponse(status_code=400, content={"message": "Invalid parameter."})
     drive = str(payload.get("drive") or "bal")
     if drive not in ("leak", "stock", "bal"):
         return JSONResponse(

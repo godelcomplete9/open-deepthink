@@ -295,6 +295,11 @@ def t8():
 
     assert is_local_url("http://localhost:8080/v1") and is_local_url("http://192.168.1.20:8080")
     assert not is_local_url("https://openrouter.ai/api/v1")
+    from deepthink.nomosloop.routing import is_local_llm
+
+    # a networked client whose endpoint cannot be read fails closed
+    assert not is_local_llm(SimpleNamespace(client=object(), invoke=None))
+    assert is_local_llm(FakeLocal())
 
 
 chk("driver bridge is local-only; mapper falls back to the driver", t8)
