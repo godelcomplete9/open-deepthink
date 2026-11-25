@@ -205,3 +205,50 @@ def estimate_distillation_cost(
             "token_budget": token_budget,
         },
     )
+
+
+def estimate_rsi_cost(
+    iterations: int = 1,
+    mutators: int = 6,
+    *,
+    tokens_in: int = DEFAULT_TOKENS_IN,
+    tokens_out: int = DEFAULT_TOKENS_OUT,
+) -> CostEstimate:
+    """Count RSI-loop LLM calls for a given iteration / mutator-swarm size.
+
+    Matches ``deepthink.nomosloop.pipeline.run_rsi_pipeline``:
+
+    * one-time induction: tokenizer + motif miner + hierarchy synthesizer +
+      consistency checker (4 calls)
+    * per iteration: N mutation proposers + N measured fitness evaluators +
+      1 artifact designer (2N + 1 calls)
+    * mesh spawn / rectify are deterministic (no LLM calls)
+    """
+    iters = max(1, int(iterations))
+    n = max(0, int(mutators))
+    induction = 4
+    per_iter = 2 * n + 1
+    calls = induction + iters * per_iter
+    return CostEstimate(
+        kind="rsi",
+        llm_calls=calls,
+        est_tokens_in=calls * tokens_in,
+        est_tokens_out=calls * tokens_out,
+        est_tokens_total=calls * (tokens_in + tokens_out),
+        breakdown={
+            "induction": induction,
+            "mutation_propose": iters * n,
+            "fitness_eval": iters * n,
+            "artifact_design": iters,
+        },
+        notes=[
+            "Counts LLM invocations the RSI LangGraph will issue.",
+            "Fitness is measured by executing rewrites; the LLM only audits.",
+            "mutators=0 is the no-mutation baseline (induction + artifact only).",
+        ],
+        topology={
+            "iterations": iters,
+            "mutators": n,
+            "per_iteration_calls": per_iter,
+        },
+    )

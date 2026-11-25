@@ -1699,6 +1699,145 @@ async def download_distillation():
     )
 
 
+# ── RSI loop (fourth section) ────────────────────────────────────────────────
+# Live node events are pushed onto the SSE log stream as
+#   RSI_EVENT: {"type": "rsi_event", "phase", "node", "iteration", "log", "state"}
+# and the final result as
+#   RSI_EVENT: {"type": "rsi_complete", "result": {...}}
+
+active_rsi_task: asyncio.Task | None = None
+_RSI_EXAMPLES_DIR = "examples"
+_RSI_MAX_CHARS = 400_000
+
+
+def _build_rsi_llm(payload: dict):
+    """Chat model for RSI sub-agents, or None for the keyless offline engine."""
+    if payload.get("offline"):
+        return None
+    provider = payload.get("provider", "openrouter")
+    if provider == "openrouter":
+        api_key = payload.get("api_key", "")
+        if not api_key:
+            raise ValueError("OpenRouter API key required (or enable Simulation Mode).")
+        model = (
+            payload.get("synthesis_model", "").strip()
+            or payload.get("openrouter_model", "").strip()
+            or "stepfun/step-3.5-flash:free"
+        )
+        return ChatOpenAI(
+            model=model,
+            openai_api_key=api_key,
+            openai_api_base="https://openrouter.ai/api/v1",
+            temperature=0.4,
+        )
+    if provider == "llamacpp":
+        url = str(payload.get("llamacpp_url", "http://localhost:8080/v1")).rstrip("/")
+        url = url.replace("/chat/completions", "")
+        return ChatLlamaCpp(
+            base_url=url,
+            api_key="no-key-required",
+            model=payload.get("llamacpp_model", "llama-3.2-1b-instruct"),
+            temperature=0.4,
+            max_tokens=4096,
+        )
+    raise ValueError("Invalid provider. Please select openrouter or llamacpp.")
+
+
+@app.get("/rsi_examples")
+async def rsi_examples():
+    """Bundled formal fragments the RSI tab can load as a starting artifact."""
+    import os
+
+    out = []
+    if os.path.isdir(_RSI_EXAMPLES_DIR):
+        for name in sorted(os.listdir(_RSI_EXAMPLES_DIR)):
+            if not name.endswith((".txt", ".md")):
+                continue
+            with open(os.path.join(_RSI_EXAMPLES_DIR, name), encoding="utf-8") as f:
+                out.append({"name": name, "text": f.read()})
+    return {"examples": out}
+
+
+@app.post("/start_rsi")
+async def start_rsi(payload: dict = Body(...)):
+    """Start one RSI run in the background; progress streams over /stream_log."""
+    global active_rsi_task
+    from deepthink.nomosloop import run_rsi_pipeline
+
+    if active_rsi_task is not None and not active_rsi_task.done():
+        return JSONResponse(status_code=409, content={"message": "An RSI run is already active."})
+
+    text = str(payload.get("text", "") or "")
+    if not text.strip():
+        return JSONResponse(status_code=400, content={"message": "Paste a formal artifact first."})
+    if len(text) > _RSI_MAX_CHARS:
+        return JSONResponse(
+            status_code=400,
+            content={"message": f"Artifact too large ({len(text):,} > {_RSI_MAX_CHARS:,} chars)."},
+        )
+    try:
+        iterations = max(1, min(8, int(payload.get("iterations", 2))))
+        mutators = max(0, min(24, int(payload.get("mutators", 6))))
+    except (TypeError, ValueError):
+        return JSONResponse(status_code=400, content={"message": "Invalid iterations/mutators."})
+    title = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(payload.get("law_title") or "rsi-artifact"))[:60]
+    offline = bool(payload.get("offline", False))
+
+    try:
+        llm = _build_rsi_llm(payload)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse(status_code=400, content={"message": str(e)})
+
+    loop = asyncio.get_running_loop()
+
+    def _emit(obj: dict) -> None:
+        line = "RSI_EVENT: " + json.dumps(obj, default=str)
+        loop.call_soon_threadsafe(log_stream.put_nowait, line)
+
+    def _on_event(ev: dict) -> None:
+        _emit({"type": "rsi_event", **ev})
+
+    async def _log(msg: str) -> None:
+        await log_stream.put(msg)
+
+    async def _run() -> None:
+        global active_rsi_task
+        from deepthink.nomosloop import describe_topology, set_topology
+
+        # TOPOLOGY is a process-global the loop may rewire. A CLI run gets a
+        # fresh process; give each web run the same clean slate so one run's
+        # accepted rewire (e.g. entry -> scale_induction) can't silently skip
+        # ingest in the next.
+        topo_before = describe_topology()
+        try:
+            result = await run_rsi_pipeline(
+                llm,
+                text,
+                law_title=title,
+                iterations=iterations,
+                mutators=mutators,
+                artifact_path=f"artifacts/artifact_rsi_{title}_{uuid.uuid4().hex[:6]}.py",
+                params={"offline": offline},
+                log=_log,
+                on_event=_on_event,
+            )
+            _emit({"type": "rsi_complete", "result": result})
+        except Exception as e:  # noqa: BLE001
+            _emit({"type": "rsi_complete", "result": {"mode": "rsi", "error": str(e)}})
+        finally:
+            set_topology(topo_before)
+            active_rsi_task = None
+
+    active_rsi_task = asyncio.create_task(_run())
+    return {
+        "status": "started",
+        "law_title": title,
+        "iterations": iterations,
+        "mutators": mutators,
+        "offline": offline,
+    }
+
+
 @app.on_event("startup")
 async def startup_event():
     asyncio.create_task(log_broadcaster_worker())

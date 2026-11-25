@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="css/prism-toolbar.min.css">
     <link rel="stylesheet" href="css/node-chat.css">
     <link rel="stylesheet" href="css/theme.css">
+    <link rel="stylesheet" href="css/rsi.css">
 </head>
 
 <body>
@@ -60,6 +61,7 @@
             <button class="mode-tab active" data-mode="app_slot_machine">🎰 App Slot Machine Mode</button>
             <button class="mode-tab" data-mode="brainstorm">🧠 Brainstorming Mode</button>
             <button class="mode-tab" data-mode="distillation">⚗️ Knowledge Distillation</button>
+            <button class="mode-tab" data-mode="rsi">♾️ RSI Loop</button>
         </div>
     </div>
 
@@ -125,6 +127,82 @@
                     <div id="distil-console">Waiting for distillation to start...</div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- RSI Loop Mode Container (recursive self-improvement over formal artifacts) -->
+    <div class="container rsi-container hidden" id="rsi-mode">
+        <div class="section">
+            <h2 class="rsi-section-title">♾️ RSI Loop <small>recursive self-improvement over formal artifacts</small></h2>
+            <form id="rsi-form">
+                <div class="rsi-examples" id="rsi-examples">
+                    <span class="app-hint">Load an example:</span>
+                </div>
+                <label for="rsi-text">Formal artifact — a law, spec, math/physics model, or code docs</label>
+                <textarea id="rsi-text" class="rsi-artifact-input" placeholder="Paste any generative formal system: definitions, rules, equations, a module's docs…" required></textarea>
+
+                <div class="app-control-row">
+                    <div class="rsi-field">
+                        <label for="rsi-title">Law title</label>
+                        <input type="text" id="rsi-title" class="app-input--compact" style="width: 200px !important;" value="rsi-artifact">
+                    </div>
+                    <div class="rsi-field">
+                        <label for="rsi-iterations">Loops</label>
+                        <input type="number" id="rsi-iterations" class="app-input--compact app-input--narrow" value="2" min="1" max="8">
+                    </div>
+                    <div class="rsi-field">
+                        <label for="rsi-mutators">Mutators / loop</label>
+                        <input type="number" id="rsi-mutators" class="app-input--compact app-input--narrow" value="6" min="0" max="24">
+                    </div>
+                    <div class="app-control-group" style="align-self: flex-end; padding-bottom: 0.4rem;">
+                        <input type="checkbox" id="rsi-offline" checked>
+                        <label for="rsi-offline" title="Runs the real RSI engine with its deterministic offline heuristics. No API key or network calls.">🚀 Simulation Mode (Offline engine — No Cost)</label>
+                    </div>
+                </div>
+                <div class="app-control-row" style="margin-bottom: 0;">
+                    <label for="rsi-file-input" class="app-file-label">📄 Load file</label>
+                    <input type="file" id="rsi-file-input" accept=".txt,.md,.py,.tex,.rst,.json,.yaml,.yml,.toml" style="display: none;">
+                    <span id="rsi-status" class="app-status"></span>
+                </div>
+                <div class="app-action-row" style="margin-top: 1rem;">
+                    <button type="submit" id="rsi-start-btn" class="app-btn--success" style="width: auto;">Start RSI Loop</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="section rsi-stage-section">
+            <div id="rsi-lattice"></div>
+            <div class="rsi-rail" id="rsi-rail"></div>
+        </div>
+
+        <div class="rsi-instruments">
+            <div class="rsi-card">
+                <div class="rsi-card__title">Instantiation capacity <b id="rsi-cap-instances"></b></div>
+                <div id="rsi-capacity"><span class="rsi-empty">Measured per lattice version.</span></div>
+            </div>
+            <div class="rsi-card">
+                <div class="rsi-card__title">Scale lattice <b id="rsi-lattice-version"></b></div>
+                <div class="rsi-levels" id="rsi-levels"><span class="rsi-empty">Induced from mined motifs.</span></div>
+            </div>
+            <div class="rsi-card">
+                <div class="rsi-card__title">Mutator swarm <b id="rsi-swarm-count"></b></div>
+                <div class="rsi-swarm" id="rsi-swarm"><span class="rsi-empty">Proposals are scored by measured capacity.</span></div>
+            </div>
+        </div>
+
+        <div class="section hidden" id="rsi-results">
+            <div class="header-with-button">
+                <h2>Evolved Law</h2>
+                <button type="button" id="rsi-download-btn" class="app-btn--secondary">⬇ Download artifact</button>
+            </div>
+            <div class="rsi-result-tabs">
+                <button type="button" class="mode-tab active" data-rsi-pane="summary">Summary</button>
+                <button type="button" class="mode-tab" data-rsi-pane="artifact">Artifact</button>
+                <button type="button" class="mode-tab" data-rsi-pane="looplog">Loop log</button>
+            </div>
+            <div class="rsi-result-pane" data-rsi-pane-body="summary"><div class="rsi-summary" id="rsi-summary"></div></div>
+            <div class="rsi-result-pane rsi-artifact hidden" data-rsi-pane-body="artifact"><pre><code id="rsi-artifact-code" class="language-python"></code></pre></div>
+            <div class="rsi-result-pane hidden" data-rsi-pane-body="looplog"><div class="rsi-looplog" id="rsi-looplog"></div></div>
         </div>
     </div>
 
@@ -347,6 +425,8 @@
     <script src="js/components/memory-calculator.js"></script>
     <script src="js/components/node-chat.js"></script>
     <script src="js/components/vortex-animation.js?v=3"></script>
+    <script src="js/components/rsi-lattice.js"></script>
+    <script src="js/components/rsi-mode.js"></script>
     <script>
         const APP_COLORS = {
             user: '#a78bfa',
@@ -553,11 +633,12 @@
                 const bs = document.getElementById('brainstorm-mode');
                 const slot = document.getElementById('app-slot-machine-mode');
                 const distil = document.getElementById('distillation-mode');
+                const rsi = document.getElementById('rsi-mode');
 
                 const mode = tab.dataset.mode;
 
                 // Update Containers
-                [bs, slot, distil].forEach(c => {
+                [bs, slot, distil, rsi].forEach(c => {
                     if (c) {
                         c.classList.add('hidden');
                         c.classList.remove('active');
@@ -579,6 +660,11 @@
                         distil.classList.remove('hidden');
                         distil.classList.add('active');
                     }
+                } else if (mode === 'rsi') {
+                    if (rsi) {
+                        rsi.classList.remove('hidden');
+                        rsi.classList.add('active');
+                    }
                 }
 
                 const globalPerplexity = document.getElementById('perplexity-chart-container');
@@ -591,6 +677,10 @@
                     if (globalGraphComp) globalGraphComp.classList.remove('hidden');
                 } else if (mode === 'distillation') {
                     if (globalPerplexity) globalPerplexity.classList.remove('hidden');
+                    if (globalLogComp) globalLogComp.classList.remove('hidden');
+                    if (globalGraphComp) globalGraphComp.classList.add('hidden');
+                } else if (mode === 'rsi') {
+                    if (globalPerplexity) globalPerplexity.classList.add('hidden');
                     if (globalLogComp) globalLogComp.classList.remove('hidden');
                     if (globalGraphComp) globalGraphComp.classList.add('hidden');
                 }
@@ -1939,6 +2029,17 @@
 
         eventSource.onmessage = function (event) {
             const rawMessage = event.data;
+
+            // RSI loop: structured live events go to the lattice, never the chat.
+            const rsiAt = rawMessage.indexOf('RSI_EVENT:');
+            if (rsiAt !== -1 && rsiAt < 12) {
+                if (window.RsiMode) RsiMode.handleEvent(rawMessage.slice(rsiAt + 'RSI_EVENT:'.length));
+                return;
+            }
+            if (window.RsiMode && RsiMode.isActive() && rawMessage.includes('FINAL_ANSWER:')) {
+                addLogMessage('[RSI] final summary received.', { color: 'cyan' });
+                return;
+            }
 
             if ((rawMessage.includes('"type":') || rawMessage.startsWith('{')) && (rawMessage.includes('distillation_update') || rawMessage.includes('distillation_complete') || rawMessage.includes('perplexity_update'))) {
                 try {

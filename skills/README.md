@@ -1,7 +1,7 @@
 # Portable Skills
 
 Agent-agnostic skill packages you can drop into any agentic coding harness
-(Grok Build, Claude Code, Cursor, Codex, custom runners, etc.).
+(Claude Code, Cursor, Codex, custom runners, etc.).
 
 These skills encode **procedures**, not host-specific APIs. Tool names in the
 body are examples — adapt them to your runtime.
@@ -26,39 +26,39 @@ in each skill folder; engines are `deepthink.qnn` / `deepthink.qdad`.
 
 ### Option A — Copy into the host skills directory
 
-**Grok Build / Grok agent skills** (user scope, all projects):
+**User scope** (all projects). Paths below use Claude Code (`~/.claude/skills`); swap in your host's skills root for Cursor, Codex, or another harness:
 
 ```bash
 # Linux / macOS — both skills
-mkdir -p ~/.grok/skills/qnn ~/.grok/skills/qdad
-cp skills/qnn/SKILL.md ~/.grok/skills/qnn/SKILL.md
-cp skills/qdad/SKILL.md ~/.grok/skills/qdad/SKILL.md
+mkdir -p ~/.claude/skills/qnn ~/.claude/skills/qdad
+cp skills/qnn/SKILL.md ~/.claude/skills/qnn/SKILL.md
+cp skills/qdad/SKILL.md ~/.claude/skills/qdad/SKILL.md
 
 # Windows (PowerShell)
-New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.grok\skills\qnn"
-New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.grok\skills\qdad"
-Copy-Item skills\qnn\SKILL.md "$env:USERPROFILE\.grok\skills\qnn\SKILL.md"
-Copy-Item skills\qdad\SKILL.md "$env:USERPROFILE\.grok\skills\qdad\SKILL.md"
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.claude\skills\qnn"
+New-Item -ItemType Directory -Force -Path "$env:USERPROFILE\.claude\skills\qdad"
+Copy-Item skills\qnn\SKILL.md "$env:USERPROFILE\.claude\skills\qnn\SKILL.md"
+Copy-Item skills\qdad\SKILL.md "$env:USERPROFILE\.claude\skills\qdad\SKILL.md"
 ```
 
 **Project scope** (share with a single repo):
 
 ```bash
-mkdir -p .grok/skills/qnn .grok/skills/qdad
-cp skills/qnn/SKILL.md .grok/skills/qnn/SKILL.md
-cp skills/qdad/SKILL.md .grok/skills/qdad/SKILL.md
+mkdir -p .claude/skills/qnn .claude/skills/qdad
+cp skills/qnn/SKILL.md .claude/skills/qnn/SKILL.md
+cp skills/qdad/SKILL.md .claude/skills/qdad/SKILL.md
 ```
 
 ### Option B — Install from a GitHub Release asset
 
 Download `qnn-skill-*.zip` and/or `qdad-skill-*.zip` from
 [Releases](https://github.com/iblameandrew/open-deepthink/releases), unzip into
-your host’s skills root (e.g. `~/.grok/skills/`).
+your host’s skills root (e.g. `~/.claude/skills/`).
 
 ```bash
 gh release download --repo iblameandrew/open-deepthink --pattern "*-skill-*.zip"
-unzip qnn-skill-*.zip -d ~/.grok/skills
-unzip qdad-skill-*.zip -d ~/.grok/skills
+unzip qnn-skill-*.zip -d ~/.claude/skills
+unzip qdad-skill-*.zip -d ~/.claude/skills
 ```
 
 ### Option C — Point the agent at the file

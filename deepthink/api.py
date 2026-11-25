@@ -23,6 +23,9 @@ from deepthink.distillation import (
     DistillationAgent,
     DistillationGraph,
 )
+
+# ── RSI (recursive self-improvement over formal artifacts) ───────────────
+from deepthink.nomosloop import default_rsi_params, run_rsi_pipeline
 from deepthink.providers import create_chat_model, create_llm
 
 # ── QDAD ─────────────────────────────────────────────────────────────────
@@ -113,6 +116,51 @@ async def run_qdad(
     )
 
 
+async def run_rsi(
+    llm,
+    raw_text: str,
+    params: dict[str, Any] | None = None,
+    *,
+    law_title: str = "untitled-law",
+    iterations: int = 1,
+    mutators: int | None = None,
+    artifact_path: str = "",
+    log: LogFn = None,
+    session_id: str = "",
+    session_store: dict | None = None,
+    on_event=None,
+) -> dict[str, Any]:
+    """
+    Run the RSI (recursive self-improvement) loop over a formal artifact.
+
+    The fourth open-deepthink section: RSI over artifacts that follow formal
+    structures (code repositories, math models, physics models, documentation).
+
+    Thin alias of :func:`deepthink.nomosloop.run_rsi_pipeline`.
+    """
+    # Merge explicit kwargs under any caller-supplied params (params win).
+    p = {
+        "law_title": law_title,
+        "iterations": iterations,
+        "mutators": mutators,
+        "artifact_path": artifact_path,
+        **(params or {}),
+    }
+    return await run_rsi_pipeline(
+        llm,
+        raw_text,
+        law_title=law_title,
+        iterations=iterations,
+        mutators=mutators,
+        artifact_path=artifact_path,
+        params=p,
+        log=log,
+        session_id=session_id,
+        session_store=session_store,
+        on_event=on_event,
+    )
+
+
 async def run_distillation(
     llm,
     anchor_question: str,
@@ -167,11 +215,14 @@ __all__ = [
     # Algorithms
     "run_qnn",
     "run_qdad",
+    "run_rsi",
     "run_distillation",
     "run_qnn_pipeline",
     "run_qdad_pipeline",
+    "run_rsi_pipeline",
     "default_qnn_params",
     "default_qdad_params",
+    "default_rsi_params",
     "clamp_qdad_params",
     "QNNResult",
     "QDADState",
