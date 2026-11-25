@@ -846,14 +846,13 @@ pre[class*="language-"] { border-radius: var(--app-radius-md) !important; backgr
 }
 
 .vortex-panel__label {
-  position: relative;
+  position: absolute;
+  left: 50%;
+  top: var(--vortex-label-top, 62%);
+  transform: translateX(-50%);
   z-index: 40;
   pointer-events: none;
-  padding: 0.85rem 1.25rem;
-  background: rgba(0, 0, 0, 0.4);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 0.85rem;
+  white-space: nowrap;
 }
 
 .vortex-panel__label-text {
@@ -877,11 +876,12 @@ pre[class*="language-"] { border-radius: var(--app-radius-md) !important; backgr
     grid-template-columns: 1fr;
   }
   .mode-vortex-section {
-    min-height: 280px;
+    min-height: 0;
   }
   .mode-vortex-panel-shell {
-    min-height: 260px;
-    height: 280px;
+    flex: 0 0 auto;
+    min-height: 180px;
+    height: 180px;
   }
 }
 
@@ -891,6 +891,5 @@ pre[class*="language-"] { border-radius: var(--app-radius-md) !important; backgr
   .section { padding: 1.25rem; border-radius: var(--app-radius-md); }
   .mode-tabs { flex-direction: column; border-radius: var(--app-radius-md); }
   .mode-tab { text-align: center; }
-  .vortex-panel__label { padding: 0.7rem 1rem; }
   .vortex-panel__label-text { font-size: 0.65rem; letter-spacing: 0.22em; }
 }

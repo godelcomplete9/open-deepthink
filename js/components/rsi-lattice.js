@@ -1,83 +1,85 @@
 /**
- * RsiLattice — "Ouroboros Lattice" visualisation for the RSI loop.
+ * RsiLattice: "Ouroboros Lattice" for the RSI security loop.
  *
- *   • Outer ring  = the self-mutable LangGraph loop. The five looping stages
- *                   (mutation_proposal → mesh_spawn → fitness → artifact_emit
- *                   → rectify) sit on a circle; ingest and scale_induction
- *                   arrive along a spiral tail that feeds into the ring, so
- *                   the whole graph reads as a serpent swallowing its tail.
- *   • Comet       = the active node; it only ever travels forward.
- *   • Echo orbits = one faint ring per completed iteration (recursion depth).
- *   • Mandala     = the scale lattice. The most compact level sits at the
- *                   centre; each lower level is a wider ring, carrying its
- *                   mesh instantiations. "expands-to" links run outward,
- *                   spawned peers/children are dashed, and every node hosts
- *                   orbiting inhabitant agents (amber = spawned offspring).
- *   • Swarm       = mutation proposals: born at mutation_proposal, judged at
- *                   fitness, absorbed into the lattice at rectify (or shed).
+ * A flat line drawing: hairlines, solid dots, one accent colour for the loop's
+ * progress, and red / green only where they mean leak / stock.
  *
- * Events are queued and replayed with a minimum dwell so the offline engine
- * (which finishes in milliseconds) still reads as a loop.
+ *   • Ring   = the loop. The five looping stages (correspond, tick, heal,
+ *              stock, lora) sit on a circle; ingest and scale induction
+ *              spiral into it as a tail. A dot travels the ring and the
+ *              accent arc shows how far the current pass has gone.
+ *   • AX band (outer)   = the security policy: clauses grouped by level
+ *              (principles, policies, controls, assets) and the viable control
+ *              operations. Contradictory clauses are joined by red chords.
+ *              Controls added by the loop appear in green.
+ *   • TC spokes         = the table of correspondences: one gauge link from
+ *              each clause to its agent; a twisted link (cos A <= 0) is red.
+ *   • AM lattice (inner) = Agent Mechanics agents, placed on their clause's
+ *              spoke at a radius set by rank (Attr near the core, Inr near the
+ *              band) and drawn brighter with rank. A leaking agent is red; a
+ *              stocking agent is green. Hostile (op) edges are dashed red.
+ *
+ * Heals draw a red line from the agent to the clashing clauses. Kept controls
+ * draw a green line from the stocking agent to the band. The accent arc
+ * around the core is the clamped LoRA scale. Events are replayed with a
+ * minimum dwell so the offline engine, which finishes in milliseconds, still
+ * reads as a loop.
  */
 const RsiLattice = (() => {
     'use strict';
 
-    const LOOP = ['mutation_proposal', 'mesh_spawn', 'fitness', 'artifact_emit', 'rectify'];
+    const LOOP = ['correspond', 'tick', 'heal', 'stock', 'lora'];
     const TAIL = ['ingest', 'scale_induction'];
     const STAGE_META = {
-        ingest: { label: 'ingest', hint: 'tokenising the formal artifact' },
-        scale_induction: { label: 'scale induction', hint: 'mining motifs → inducing the scale lattice' },
-        mutation_proposal: { label: 'mutate', hint: 'spawning the mutator swarm' },
-        mesh_spawn: { label: 'mesh spawn', hint: 'materialising instantiations · agents inhabit the mesh' },
-        fitness: { label: 'fitness', hint: 'measuring capacity Δ against the holdout gate' },
-        artifact_emit: { label: 'artifact', hint: 'emitting a runnable artifact' },
-        rectify: { label: 'rectify', hint: 'keep / rollback · elevating the lattice' },
+        ingest: { label: 'ingest', hint: 'tokenising the policy' },
+        scale_induction: { label: 'induce', hint: 'clauses → principles, policies, controls, assets' },
+        correspond: { label: 'correspond', hint: 'table of correspondences · one agent per clause, modulus and operation' },
+        tick: { label: 'tick', hint: 'the Agent Mechanics tick law · flux, Leak, stock, ranks, ensembles' },
+        heal: { label: 'heal', hint: 'leaking agents heal with licensed operators → findings' },
+        stock: { label: 'stock', hint: 'surplus becomes controls · kept only if posture improves' },
+        lora: { label: 'lora', hint: 'distil the traces · clamp the adapter when the loop improves' },
+        artifact_emit: { label: 'report', hint: 'hardened policy, findings and the NX-1 log' },
+    };
+    const SPECIES_COL = {
+        Ni: [139, 92, 246], Ne: [192, 132, 252], Si: [59, 130, 246], Se: [6, 182, 212],
+        Ti: [45, 212, 191], Te: [163, 230, 53], Fi: [251, 191, 36], Fe: [244, 114, 182],
     };
     const COL = {
-        violet: [139, 92, 246],
-        blue: [59, 130, 246],
-        cyan: [6, 182, 212],
-        green: [52, 211, 153],
-        red: [239, 68, 68],
-        amber: [251, 191, 36],
-        white: [255, 255, 255],
+        violet: [139, 92, 246], cyan: [6, 182, 212], green: [52, 211, 153],
+        red: [239, 68, 68], amber: [251, 191, 36], white: [255, 255, 255],
     };
-    const DWELL_MS = 620;
+    const RANK_R = { Attr: 0.2, Cyc: 0.3, Res: 0.4, Seed: 0.5, Inr: 0.58 };
+    const GROUPS = ['L3', 'L2', 'L1', 'L0', 'op'];
+    const GROUP_NAME = { L3: 'principles', L2: 'policies', L1: 'controls', L0: 'assets', op: 'operations' };
+    const DWELL_MS = 560;
     const TAU = Math.PI * 2;
 
     const rgba = (c, a) => `rgba(${c[0]},${c[1]},${c[2]},${a})`;
     const mix = (a, b, t) => [0, 1, 2].map(i => Math.round(a[i] + (b[i] - a[i]) * t));
     const ease = t => 1 - Math.pow(1 - Math.min(1, Math.max(0, t)), 3);
     const now = () => performance.now();
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-    function levelColor(i, n) {
-        const t = n <= 1 ? 0 : i / (n - 1);
-        return t < 0.5 ? mix(COL.violet, COL.blue, t * 2) : mix(COL.blue, COL.cyan, (t - 0.5) * 2);
-    }
-
-    // ── state ────────────────────────────────────────────────────────────
     let mount, canvas, ctx, tip, hud = {};
     let W = 800, H = 560, cx = 400, cy = 280, R = 200, dpr = 1;
     let raf = null, t0 = now();
     let onState = null, onStage = null;
 
-    let stages = {};          // name -> {x, y, angle, glow, done}
-    let tailPts = [];         // spiral polyline: ingest → scale_induction → ring
+    let stages = {};
+    let tailPts = [];
     let active = null;
-    let comet = null;         // {mode:'tail'|'ring', s, ts, a, ta}
-    let trail = [];
-    let levels = [];          // [{id, name, rules:[...] , color, born}]
-    let nodes = new Map();    // id -> {id, level, rule, born, dying}
-    let edges = [];
-    let agents = [];
-    let props = new Map();    // id -> {id, status, x, y, alpha, absorbed, shed}
-    let absorbed = new Set();
-    let shed = new Set();
+    let comet = null;
     let ripples = [];
-    let echoes = [];          // completed iteration count
-    let flashes = [];         // {stage, color, t}
+    let flashes = [];
+    let pulses = [];      // travelling light {from:{x,y}, to:{x,y}, t, col}
+    let chords = [];      // contradiction chords {a, b, A}
+    let ax = new Map();   // ref -> {ref, kind, text, group, angle, x, y, born, rsi}
+    let agents = new Map(); // id -> {..view, x, y, tx, ty, born}
+    let edges = [];
+    let toc = [];
+    let seen = new Set();
     let queue = [], pumping = false, lastPlay = 0;
-    let version = null, iteration = 0, maxIter = 1;
+    let version = null, iteration = 0, maxIter = 1, posture = null, clampScale = 0;
     let hover = null, mouse = null;
     let running = false;
 
@@ -92,17 +94,13 @@ const RsiLattice = (() => {
         canvas.style.width = W + 'px';
         canvas.style.height = H + 'px';
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-        R = Math.min(H * 0.39, (W / 2 - 24) / 1.5);
+        R = Math.min(H * 0.4, (W / 2 - 24) / 1.5);
         cx = W / 2 + R * 0.16;
-        cy = H / 2 + 8;
-
+        cy = H / 2 + 6;
         LOOP.forEach((name, i) => {
             const a = -Math.PI / 2 + i * TAU / LOOP.length;
-            stages[name] = { ...(stages[name] || { glow: 0, done: 0 }), x: cx + Math.cos(a) * R, y: cy + Math.sin(a) * R, angle: a };
+            stages[name] = { ...(stages[name] || { done: 0 }), x: cx + Math.cos(a) * R, y: cy + Math.sin(a) * R, angle: a };
         });
-
-        // Spiral tail: r grows as θ winds back from the ring entry at -90°.
         tailPts = [];
         const th0 = -Math.PI / 2, th1 = -Math.PI * 0.985, k = 0.48;
         for (let i = 0; i <= 80; i++) {
@@ -112,135 +110,115 @@ const RsiLattice = (() => {
             tailPts.push({ x: cx + Math.cos(th) * r, y: cy + Math.sin(th) * r, s });
         }
         const at = s => tailPts[Math.round(s * 80)];
-        stages.ingest = { ...(stages.ingest || { glow: 0, done: 0 }), ...at(0), angle: th1, s: 0 };
-        stages.scale_induction = { ...(stages.scale_induction || { glow: 0, done: 0 }), ...at(0.52), angle: th1, s: 0.52 };
+        stages.ingest = { ...(stages.ingest || { done: 0 }), ...at(0), angle: th1, s: 0 };
+        stages.scale_induction = { ...(stages.scale_induction || { done: 0 }), ...at(0.52), angle: th1, s: 0.52 };
+        placeAx();
     }
 
-    function levelRadius(i, n) {
-        if (n <= 1) return R * 0.4;
-        return R * (0.13 + 0.6 * i / (n - 1));
+    function groupOf(ref) {
+        if (ref.startsWith('op/')) return 'op';
+        const m = /^pol\/(L\d)/.exec(ref);
+        return m ? m[1] : 'op';
     }
 
-    function rot() { return (now() - t0) / 1000 * 0.035; }
-
-    function nodePos(n) {
-        const li = levels.findIndex(l => l.id === n.level);
-        if (li < 0) return null;
-        const peers = n._peers;
-        const r = levelRadius(li, levels.length) + (n.gen || 0) * 7;
-        const a = rot() + ((peers.offset || 0) + peers.idx / peers.count) * TAU;
-        return { x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r, li };
-    }
-
-    /**
-     * Radial-tree ordering: the top level is spread evenly; each lower ring
-     * is ordered by the mean angle of its parents, so expansion links fan
-     * outward instead of crossing the mandala.
-     */
-    function reindexNodes() {
-        const byLevel = new Map();
-        for (const n of nodes.values()) {
-            if (!byLevel.has(n.level)) byLevel.set(n.level, []);
-            byLevel.get(n.level).push(n);
-        }
-        const parents = new Map();
-        edges.forEach(([s, d]) => {
-            if (!parents.has(d)) parents.set(d, []);
-            parents.get(d).push(s);
+    function placeAx() {
+        const list = [...ax.values()];
+        const order = r => GROUPS.indexOf(r.group) * 10000 + (r.ref.includes('#mod') ? 0 : 1) * 1000 + (parseFloat((r.ref.match(/§R?([\d.]+)/) || [])[1]) || 0) + (r.ref.includes('§R') ? 500 : 0);
+        list.sort((a, b) => order(a) - order(b) || a.ref.localeCompare(b.ref));
+        const groups = GROUPS.filter(g => list.some(n => n.group === g));
+        const gap = 0.12;
+        const usable = TAU - gap * groups.length;
+        let a = -Math.PI / 2 + gap / 2;
+        const rax = R * 0.8;
+        let prev = null;
+        list.forEach(n => {
+            if (prev && prev !== n.group) a += gap;
+            prev = n.group;
+            n.angle = a + (usable / Math.max(1, list.length)) / 2;
+            n.x = cx + Math.cos(n.angle) * rax;
+            n.y = cy + Math.sin(n.angle) * rax;
+            a += usable / Math.max(1, list.length);
         });
-        const order = levels.map(l => l.id).concat([...byLevel.keys()].filter(k => !levels.some(l => l.id === k)));
-        const angleOf = new Map(); // id -> fraction of a turn
-        order.forEach(lid => {
-            const list = byLevel.get(lid);
-            if (!list) return;
-            const key = n => {
-                const ps = (parents.get(n.id) || []).filter(p => angleOf.has(p));
-                if (!ps.length) return null;
-                // circular mean of parent angles
-                let x = 0, y = 0;
-                ps.forEach(p => { x += Math.cos(angleOf.get(p) * TAU); y += Math.sin(angleOf.get(p) * TAU); });
-                return ((Math.atan2(y, x) / TAU) + 1) % 1;
-            };
-            const keyed = list.map(n => ({ n, k: key(n) }));
-            keyed.sort((a, b) => {
-                if (a.k !== null && b.k !== null && a.k !== b.k) return a.k - b.k;
-                if (a.k === null && b.k !== null) return 1;
-                if (b.k === null && a.k !== null) return -1;
-                return (a.n.rule + a.n.id).localeCompare(b.n.rule + b.n.id);
-            });
-            // rotate so the ring starts near its first parent's angle
-            const offset = keyed.length && keyed[0].k !== null ? keyed[0].k : 0;
-            keyed.forEach(({ n }, i) => {
-                n._peers = { idx: i, count: keyed.length, offset };
-                angleOf.set(n.id, (offset + i / keyed.length) % 1);
-            });
-        });
+        for (const ag of agents.values()) targetAgent(ag);
     }
 
-    // ── data ingestion ───────────────────────────────────────────────────
-    function applySnapshot(st, node) {
+    function targetAgent(ag) {
+        if (ag.px === undefined) { ag.px = cx; ag.py = cy; }
+        if (ag.id === 'I1' || !ag.ax) { ag.tx = cx; ag.ty = cy; return; }
+        const node = ax.get(ag.ax);
+        const r = R * (RANK_R[ag.rank] || 0.5);
+        const ang = node ? node.angle : 0;
+        ag.tx = cx + Math.cos(ang) * r;
+        ag.ty = cy + Math.sin(ang) * r;
+    }
+
+    // ── data ─────────────────────────────────────────────────────────────
+    function applySnapshot(st) {
         if (!st) return;
         const t = now();
-        const lat = st.lattice || {};
-        const newVersion = lat.version;
-        const prevIds = new Set(levels.map(l => l.id));
-        levels = (lat.levels || []).map((lv, i, arr) => ({
-            ...lv,
-            color: levelColor(i, arr.length),
-            born: prevIds.has(lv.id) ? (levels.find(l => l.id === lv.id) || {}).born || t : t + i * 120,
-        }));
-        version = newVersion;
+        version = (st.lattice || {}).version || version;
         iteration = st.iteration || 0;
         maxIter = st.max_iterations || maxIter;
-
-        // mesh
-        const mesh = st.mesh || { nodes: [], edges: [] };
-        if (mesh.nodes.length) {
+        const post = st.posture || [];
+        if (post.length) posture = post[post.length - 1];
+        if (st.lora) clampScale = st.lora.scale || 0;
+        const rsiRules = new Set();
+        (st.lattice?.levels || []).forEach(lv => (lv.rules || []).forEach(r => { if (r.rsi) rsiRules.add(`pol/${lv.id}/${r.id}`); }));
+        if (Array.isArray(st.ax)) {
             const keep = new Set();
-            const gen = new Map();
-            (st.agents || []).forEach(a => { if (a.gen > (gen.get(a.node) || 0)) gen.set(a.node, a.gen); });
-            mesh.nodes.forEach((m, i) => {
-                keep.add(m.id);
-                const ex = nodes.get(m.id);
-                if (ex) { ex.level = m.level; ex.rule = m.rule; ex.dying = 0; ex.gen = gen.get(m.id) || 0; }
-                else nodes.set(m.id, { ...m, born: t + i * 28, dying: 0, gen: gen.get(m.id) || 0 });
+            st.ax.forEach(n => {
+                keep.add(n.ref);
+                const ex = ax.get(n.ref);
+                if (ex) { ex.text = n.text; ex.rsi = rsiRules.has(n.ref); }
+                else ax.set(n.ref, { ...n, group: groupOf(n.ref), born: t, rsi: rsiRules.has(n.ref) });
             });
-            for (const n of nodes.values()) if (!keep.has(n.id) && !n.dying) n.dying = t;
-            edges = mesh.edges;
-            agents = (st.agents || []).map((a, i) => ({
-                ...a,
-                phase: (i * 2.399) % TAU,
-                speed: 0.9 + (i % 5) * 0.18,
-            }));
-            reindexNodes();
+            for (const k of [...ax.keys()]) if (!keep.has(k)) ax.delete(k);
+            chords = (st.ax_edges || []).filter(e => e[2] >= Math.PI / 2).map(e => ({ a: e[0], b: e[1], A: e[2] }));
+            placeAx();
         }
-
-        // proposals
-        (st.proposals || []).forEach(p => {
-            const ex = props.get(p.id);
-            if (ex) { ex.status = p.status; ex.score = p.score; ex.op = p.op; }
-            else if (!absorbed.has(p.id) && !shed.has(p.id)) {
-                const s = stages.mutation_proposal;
-                props.set(p.id, { ...p, x: s.x, y: s.y, alpha: 0, born: t });
-            }
+        if (Array.isArray(st.agents)) {
+            const keep = new Set();
+            st.agents.forEach(v => {
+                keep.add(v.id);
+                const ex = agents.get(v.id);
+                if (ex) Object.assign(ex, v);
+                else agents.set(v.id, { ...v, born: t });
+                targetAgent(agents.get(v.id));
+            });
+            for (const k of [...agents.keys()]) if (!keep.has(k)) agents.delete(k);
+        }
+        if (Array.isArray(st.edges)) edges = st.edges;
+        if (Array.isArray(st.toc)) toc = st.toc;
+        (st.events || []).forEach(ev => {
+            const key = ev.text;
+            if (seen.has(key)) return;
+            seen.add(key);
+            effect(ev, t);
         });
-
-        if (node === 'fitness') {
-            for (const p of props.values()) if (p.status === 'rejected' && !shed.has(p.id)) { shed.add(p.id); p.shedAt = t; }
-        }
-        if (node === 'rectify') {
-            for (const p of props.values()) if (p.status === 'accepted' && !absorbed.has(p.id)) { absorbed.add(p.id); p.absorbAt = t; }
-            const caps = st.capacity || [];
-            const prev = [...caps].reverse().find(c => c.iteration < iteration) || caps[0];
-            const gained = caps.length >= 2 && caps[caps.length - 1].capacity > prev.capacity + 1e-9;
-            ripples.push({ t, color: gained ? COL.green : COL.white });
-            if ((st.rollbacks || []).some(r => r.iteration === iteration)) flashes.push({ stage: 'rectify', color: COL.red, t });
-            echoes.push({ t, i: echoes.length });
-        }
-        if (node === 'scale_induction') ripples.push({ t, color: COL.violet });
     }
 
-    // ── event queue (paced replay) ───────────────────────────────────────
+    function effect(ev, t) {
+        const ag = agents.get(ev.agent);
+        if (ev.kind === 'leak' && ag) {
+            flashes.push({ x: ag.px, y: ag.py, col: COL.red, t });
+            const own = toc.filter(r => r.agent === ag.id).map(r => ax.get(r.ax)).filter(Boolean);
+            own.forEach(n => pulses.push({ from: { x: ag.px, y: ag.py }, to: { x: n.x, y: n.y }, t, col: COL.red, dur: 900 }));
+        } else if (ev.kind === 'clash') {
+            const a = ax.get(ev.a1), b = ax.get(ev.a2);
+            if (a && b) pulses.push({ from: { x: a.x, y: a.y }, to: { x: b.x, y: b.y }, t, col: COL.red, dur: 1100, chord: true });
+        } else if (ev.kind === 'stock' && ag) {
+            flashes.push({ x: ag.px, y: ag.py, col: COL.green, t });
+            const n = ev.ref ? ax.get(ev.ref) : null;
+            const to = n ? { x: n.x, y: n.y } : { x: cx, y: cy - R * 0.8 };
+            pulses.push({ from: { x: ag.px, y: ag.py }, to, t, col: COL.green, dur: 1000 });
+        } else if (ev.kind === 'clamp') {
+            ripples.push({ t, col: ev.decision === 'rollback' ? COL.white : COL.violet });
+        } else if (ev.kind === 'brk' && ag) {
+            flashes.push({ x: ag.px, y: ag.py, col: COL.white, t });
+        }
+    }
+
+    // ── queue ────────────────────────────────────────────────────────────
     function push(ev) { queue.push(ev); pump(); }
 
     function pump() {
@@ -262,7 +240,7 @@ const RsiLattice = (() => {
     function play(ev) {
         if (ev.type === 'complete') {
             setActive(null);
-            if (ev.snapshot) applySnapshot(ev.snapshot, 'complete');
+            if (ev.snapshot) applySnapshot(ev.snapshot);
             running = false;
             updateHud();
             if (onState) onState(ev.snapshot, ev);
@@ -272,8 +250,8 @@ const RsiLattice = (() => {
             setActive(ev.node);
         } else {
             const s = stages[ev.node];
-            if (s) { s.done += 1; flashes.push({ stage: ev.node, color: COL.violet, t: now() }); }
-            applySnapshot(ev.state, ev.node);
+            if (s) s.done += 1;
+            applySnapshot(ev.state);
         }
         updateHud();
         if (onState) onState(ev.state, ev);
@@ -282,7 +260,7 @@ const RsiLattice = (() => {
     function setActive(name) {
         active = name;
         if (onStage) onStage(name);
-        if (!name) return;
+        if (!name || !stages[name]) return;
         if (TAIL.includes(name)) {
             const s = stages[name].s;
             if (!comet || comet.mode !== 'tail') comet = { mode: 'tail', s: 0, ts: s };
@@ -299,13 +277,15 @@ const RsiLattice = (() => {
         comet.ta = target;
     }
 
-    // ── render ───────────────────────────────────────────────────────────
-    function cometPos() {
+    // ── render: a flat line drawing (hairlines, solid dots, no glow) ─────
+    const INK = a => `rgba(255,255,255,${a})`;
+    const BG = '#08080a';
+    const RANK_ALPHA = { Attr: 0.85, Cyc: 0.7, Res: 0.58, Seed: 0.48, Inr: 0.38 };
+    const RANK_SIZE = { Attr: 4, Cyc: 3.4, Res: 2.9, Seed: 2.5, Inr: 2 };
+
+    function markerPoint() {
         if (!comet) return null;
-        if (comet.mode === 'tail') {
-            const p = tailPts[Math.round(Math.min(1, comet.s) * 80)];
-            return p;
-        }
+        if (comet.mode === 'tail') return tailPts[Math.round(Math.min(1, Math.max(0, comet.s)) * 80)];
         return { x: cx + Math.cos(comet.a) * R, y: cy + Math.sin(comet.a) * R };
     }
 
@@ -316,370 +296,258 @@ const RsiLattice = (() => {
             if (comet.s >= 0.995 && comet.ts >= 1) {
                 comet = { mode: 'ring', a: -Math.PI / 2, ta: comet.then !== undefined ? comet.then : -Math.PI / 2 };
                 while (comet.ta < comet.a - 1e-6) comet.ta += TAU;
-            }
-            if (comet && comet.mode === 'tail' && Math.abs(comet.ts - comet.s) < 0.002) comet.s = comet.ts;
+            } else if (Math.abs(comet.ts - comet.s) < 0.002) comet.s = comet.ts;
         } else {
             const d = comet.ta - comet.a;
             comet.a += d * 0.07 + (d > 0.001 ? 0.004 : 0);
             if (comet.a > comet.ta) comet.a = comet.ta;
-            if (!running && !active) { comet.ta += 0.006; }
+            if (!running && !active) comet.ta += 0.004;
         }
-        const p = cometPos();
-        if (p) { trail.push({ x: p.x, y: p.y }); if (trail.length > 42) trail.shift(); }
     }
 
-    function drawBackground(t) {
-        ctx.fillStyle = '#040405';
-        ctx.fillRect(0, 0, W, H);
-        const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 1.6);
-        g.addColorStop(0, 'rgba(139,92,246,0.10)');
-        g.addColorStop(0.5, 'rgba(59,130,246,0.04)');
-        g.addColorStop(1, 'transparent');
-        ctx.fillStyle = g;
+    function drawBackground() {
+        ctx.fillStyle = BG;
         ctx.fillRect(0, 0, W, H);
     }
 
-    function drawLoop(t) {
-        // echo orbits — one per completed iteration
-        echoes.forEach((e, i) => {
-            const age = ease((t - e.t) / 1200);
-            const r = R + 16 + i * 7;
-            ctx.save();
-            ctx.setLineDash([2, 6]);
-            ctx.lineDashOffset = -t / 60 * (i % 2 ? 1 : -1);
-            ctx.strokeStyle = rgba(COL.violet, 0.22 * age);
-            ctx.lineWidth = 1;
-            ctx.beginPath(); ctx.arc(cx, cy, r * (0.9 + 0.1 * age), 0, TAU); ctx.stroke();
-            ctx.restore();
-        });
-
-        // main ring
-        ctx.lineWidth = 1.4;
-        const grad = ctx.createLinearGradient(cx - R, cy - R, cx + R, cy + R);
-        grad.addColorStop(0, rgba(COL.violet, 0.55));
-        grad.addColorStop(1, rgba(COL.cyan, 0.4));
-        ctx.strokeStyle = grad;
+    function drawLoop() {
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = INK(0.16);
         ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.stroke();
-
-        // flowing direction ticks along the ring
-        ctx.save();
-        ctx.setLineDash([1, 14]);
-        ctx.lineDashOffset = -t / 40;
-        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-        ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.stroke();
-        ctx.restore();
-
-        // tail spiral
         ctx.beginPath();
         tailPts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
-        const tg = ctx.createLinearGradient(tailPts[0].x, tailPts[0].y, tailPts[80].x, tailPts[80].y);
-        tg.addColorStop(0, 'rgba(255,255,255,0.05)');
-        tg.addColorStop(1, rgba(COL.violet, 0.55));
-        ctx.strokeStyle = tg;
-        ctx.lineWidth = 1.4;
         ctx.stroke();
+        // progress through the current pass, in the accent colour
+        if (running && comet) {
+            ctx.strokeStyle = rgba(COL.violet, 0.9);
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            if (comet.mode === 'tail') {
+                const n = Math.round(Math.min(1, Math.max(0, comet.s)) * 80);
+                for (let i = 0; i <= n; i++) i ? ctx.lineTo(tailPts[i].x, tailPts[i].y) : ctx.moveTo(tailPts[0].x, tailPts[0].y);
+            } else {
+                let p = ((comet.a + Math.PI / 2) % TAU + TAU) % TAU;
+                if (p > TAU - 1e-3) p = 0; // back at correspond: a new pass starts
+                if (p > 1e-3) ctx.arc(cx, cy, R, -Math.PI / 2, -Math.PI / 2 + p);
+            }
+            ctx.stroke();
+        }
+        // direction of travel: one small arrowhead between lora and correspond
+        const a = stages.lora.angle + (TAU / 5) * 0.5;
         ctx.save();
-        ctx.setLineDash([1, 12]);
-        ctx.lineDashOffset = -t / 40;
-        ctx.strokeStyle = 'rgba(255,255,255,0.25)';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.restore();
-
-        // back-edge chevron: rectify → mutation_proposal closes the loop
-        const a = stages.rectify.angle + (TAU / 5) * 0.5;
-        const px = cx + Math.cos(a) * R, py = cy + Math.sin(a) * R;
-        ctx.save();
-        ctx.translate(px, py); ctx.rotate(a + Math.PI / 2);
-        ctx.fillStyle = rgba(COL.violet, 0.8);
-        ctx.beginPath(); ctx.moveTo(5, 0); ctx.lineTo(-4, -4); ctx.lineTo(-4, 4); ctx.closePath(); ctx.fill();
+        ctx.translate(cx + Math.cos(a) * R, cy + Math.sin(a) * R); ctx.rotate(a + Math.PI / 2);
+        ctx.fillStyle = INK(0.45);
+        ctx.beginPath(); ctx.moveTo(4, 0); ctx.lineTo(-3, -3.5); ctx.lineTo(-3, 3.5); ctx.closePath(); ctx.fill();
         ctx.restore();
     }
 
-    function drawStages(t) {
-        const all = [...TAIL, ...LOOP];
-        all.forEach(name => {
+    function drawMarker() {
+        const p = markerPoint();
+        if (!p) return;
+        ctx.fillStyle = running ? rgba(COL.violet, 1) : INK(0.7);
+        ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, TAU); ctx.fill();
+    }
+
+    function drawStages() {
+        [...TAIL, ...LOOP].forEach(name => {
             const s = stages[name];
             const isActive = active === name;
-            s.glow += ((isActive ? 1 : 0) - s.glow) * 0.08;
-            const r = 7 + s.glow * 3;
-            if (s.glow > 0.02) {
-                const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, 34);
-                g.addColorStop(0, rgba(COL.violet, 0.45 * s.glow));
-                g.addColorStop(1, 'transparent');
-                ctx.fillStyle = g;
-                ctx.beginPath(); ctx.arc(s.x, s.y, 34, 0, TAU); ctx.fill();
-                // breathing halo
-                ctx.strokeStyle = rgba(COL.violet, 0.5 * s.glow);
-                ctx.lineWidth = 1;
-                ctx.beginPath(); ctx.arc(s.x, s.y, r + 6 + 3 * Math.sin(t / 240), 0, TAU); ctx.stroke();
+            ctx.lineWidth = 1;
+            if (isActive) {
+                ctx.strokeStyle = rgba(COL.violet, 0.6);
+                ctx.beginPath(); ctx.arc(s.x, s.y, 9, 0, TAU); ctx.stroke();
             }
-            ctx.fillStyle = '#07070a';
-            ctx.strokeStyle = isActive ? '#fff' : (s.done ? rgba(COL.violet, 0.85) : 'rgba(255,255,255,0.28)');
-            ctx.lineWidth = 1.4;
-            ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, TAU); ctx.fill(); ctx.stroke();
-            if (s.done) {
-                ctx.fillStyle = rgba(COL.violet, 0.9);
-                ctx.beginPath(); ctx.arc(s.x, s.y, 2.6, 0, TAU); ctx.fill();
+            ctx.fillStyle = isActive ? rgba(COL.violet, 1) : BG;
+            ctx.strokeStyle = isActive ? rgba(COL.violet, 1) : INK(s.done ? 0.6 : 0.3);
+            ctx.beginPath(); ctx.arc(s.x, s.y, 4.5, 0, TAU); ctx.fill(); ctx.stroke();
+            if (s.done && !isActive) {
+                ctx.fillStyle = INK(0.6);
+                ctx.beginPath(); ctx.arc(s.x, s.y, 1.8, 0, TAU); ctx.fill();
             }
-
-            // label, pushed outward from the ring centre and kept on-canvas.
-            // Narrow screens show only the active label (the rail lists all).
             if (W < 560 && !isActive) return;
             const dx = s.x - cx, dy = s.y - cy, d = Math.hypot(dx, dy) || 1;
             const label = STAGE_META[name].label.toUpperCase();
-            ctx.font = '600 10px -apple-system, "Segoe UI", sans-serif';
+            ctx.font = '500 10px -apple-system, "Segoe UI", sans-serif';
             if ('letterSpacing' in ctx) ctx.letterSpacing = '1.5px';
             const tw = ctx.measureText(label).width;
-            let lx = s.x + dx / d * 22;
-            const ly = Math.max(10, Math.min(H - 10, s.y + dy / d * 20));
+            let lx = s.x + dx / d * 20;
+            const ly = Math.max(10, Math.min(H - 10, s.y + dy / d * 18));
             const align = Math.abs(dx / d) < 0.3 ? 'center' : (dx > 0 ? 'left' : 'right');
             const left = align === 'center' ? lx - tw / 2 : align === 'left' ? lx : lx - tw;
             lx += Math.max(0, 8 - left) - Math.max(0, left + tw - (W - 8));
             ctx.textAlign = align;
             ctx.textBaseline = 'middle';
-            ctx.fillStyle = isActive ? '#fff' : 'rgba(255,255,255,0.45)';
+            ctx.fillStyle = isActive ? INK(0.92) : INK(0.4);
             ctx.fillText(label, lx, ly);
             if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
         });
-
-        flashes = flashes.filter(f => t - f.t < 900);
-        flashes.forEach(f => {
-            const s = stages[f.stage]; const k = (t - f.t) / 900;
-            ctx.strokeStyle = rgba(f.color, 0.7 * (1 - k));
-            ctx.lineWidth = 1.5;
-            ctx.beginPath(); ctx.arc(s.x, s.y, 10 + 26 * ease(k), 0, TAU); ctx.stroke();
-        });
     }
 
-    function drawComet() {
-        if (trail.length < 2) return;
-        for (let i = 1; i < trail.length; i++) {
-            const k = i / trail.length;
-            ctx.strokeStyle = `rgba(255,255,255,${0.5 * k * k})`;
-            ctx.lineWidth = 2.5 * k;
-            ctx.beginPath();
-            ctx.moveTo(trail[i - 1].x, trail[i - 1].y);
-            ctx.lineTo(trail[i].x, trail[i].y);
+    function drawDomains(t) {
+        const rax = R * 0.8;
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = INK(0.07);
+        ctx.beginPath(); ctx.arc(cx, cy, rax, 0, TAU); ctx.stroke();
+        if (!ax.size) {
+            ctx.strokeStyle = INK(0.04);
+            for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.arc(cx, cy, R * (0.2 + 0.13 * i), 0, TAU); ctx.stroke(); }
+        }
+        // group labels
+        if (W >= 560) {
+            GROUPS.forEach(g => {
+                const nodes = [...ax.values()].filter(n => n.group === g);
+                if (!nodes.length) return;
+                const mid = nodes[Math.floor(nodes.length / 2)].angle;
+                // outside the band unless a stage node sits there; then just inside it
+                let lr = rax + 22;
+                const near = st => st && Math.hypot(st.x - (cx + Math.cos(mid) * lr), st.y - (cy + Math.sin(mid) * lr)) < 36;
+                if ([...TAIL, ...LOOP].some(name => near(stages[name]))) lr = rax - 16;
+                ctx.font = '500 9px -apple-system, "Segoe UI", sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = INK(0.28);
+                ctx.fillText(`${g === 'op' ? '' : g + ' · '}${GROUP_NAME[g]}`.toUpperCase(), cx + Math.cos(mid) * lr, cy + Math.sin(mid) * lr);
+            });
+        }
+        // TC spokes: one gauge link per clause; a twisted link (cos A <= 0) is red
+        ctx.lineWidth = 0.75;
+        toc.forEach(r => {
+            const n = ax.get(r.ax), ag = agents.get(r.agent);
+            if (!n || !ag || ag.px === undefined) return;
+            const al = Math.cos(r.A || 0);
+            ctx.strokeStyle = al > 0 ? INK(0.03 + 0.03 * al) : rgba(COL.red, 0.14);
+            ctx.beginPath(); ctx.moveTo(n.x, n.y); ctx.lineTo(ag.px, ag.py); ctx.stroke();
+        });
+        // contradiction chords between clauses
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = rgba(COL.red, 0.55);
+        chords.forEach(c => {
+            const a = ax.get(c.a), b = ax.get(c.b);
+            if (!a || !b) return;
+            ctx.beginPath(); ctx.moveTo(a.x, a.y);
+            ctx.quadraticCurveTo(cx + (a.x + b.x - 2 * cx) * 0.25, cy + (a.y + b.y - 2 * cy) * 0.25, b.x, b.y);
             ctx.stroke();
-        }
-        const p = trail[trail.length - 1];
-        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 14);
-        g.addColorStop(0, 'rgba(255,255,255,0.95)');
-        g.addColorStop(0.3, rgba(COL.violet, 0.6));
-        g.addColorStop(1, 'transparent');
-        ctx.fillStyle = g;
-        ctx.beginPath(); ctx.arc(p.x, p.y, 14, 0, TAU); ctx.fill();
-    }
-
-    function drawLattice(t) {
-        const n = levels.length;
-        if (!n) {
-            // ghost scaffold while idle
-            for (let i = 0; i < 4; i++) {
-                ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-                ctx.setLineDash([2, 8]);
-                ctx.beginPath(); ctx.arc(cx, cy, levelRadius(i, 4), 0, TAU); ctx.stroke();
-                ctx.setLineDash([]);
-            }
-            return;
-        }
-        const rr = rot();
-        levels.forEach((lv, i) => {
-            const k = ease((t - lv.born) / 900);
-            if (k <= 0) return;
-            const r = levelRadius(i, n) * (0.85 + 0.15 * k);
-            ctx.save();
-            ctx.setLineDash([1, 5]);
-            ctx.lineDashOffset = (i % 2 ? 1 : -1) * t / 90;
-            ctx.strokeStyle = rgba(lv.color, 0.28 * k);
-            ctx.lineWidth = 1;
-            ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU); ctx.stroke();
-            ctx.restore();
-            // rule ticks: the grammar's rules as radial notches on their scale
-            const rules = lv.rules || [];
-            rules.forEach((ru, j) => {
-                const a = -rr * (i % 2 ? 1 : -1) * 0.6 + (j / Math.max(1, rules.length)) * TAU + i;
-                ctx.strokeStyle = rgba(lv.color, 0.5 * k);
-                ctx.lineWidth = 1.2;
-                ctx.beginPath();
-                ctx.moveTo(cx + Math.cos(a) * (r - 4), cy + Math.sin(a) * (r - 4));
-                ctx.lineTo(cx + Math.cos(a) * (r + 4), cy + Math.sin(a) * (r + 4));
-                ctx.stroke();
-            });
-            // level id label at the left of each ring
-            ctx.font = '600 9px Menlo, Consolas, monospace';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillStyle = rgba(lv.color, 0.75 * k);
-            ctx.fillText(lv.id, cx, cy - r - 7);
         });
-
-        // positions this frame
-        const pos = new Map();
-        for (const nd of nodes.values()) {
-            const p = nodePos(nd);
-            if (p) pos.set(nd.id, p);
-        }
-
-        // edges
-        edges.forEach(([s, d, rel]) => {
-            const a = pos.get(s), b = pos.get(d);
-            const na = nodes.get(s), nb = nodes.get(d);
-            if (!a || !b || !na || !nb) return;
-            const k = Math.min(ease((t - na.born) / 600), ease((t - nb.born) / 600)) * fade(na, t) * fade(nb, t);
-            if (k <= 0) return;
-            const col = levels[a.li] ? levels[a.li].color : COL.white;
+        // AM edges: hostile edges dashed red, the rest in neutral ink
+        edges.forEach(([s, d, typ]) => {
+            const a = agents.get(s), b = agents.get(d);
+            if (!a || !b || a.px === undefined || b.px === undefined) return;
             ctx.save();
-            if (rel === 'expands-to') {
-                ctx.strokeStyle = rgba(col, 0.2 * k);
-                ctx.lineWidth = 0.8;
-                const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
-                const ox = (mx - cx) * 0.12, oy = (my - cy) * 0.12;
-                ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(mx + oy, my - ox, b.x, b.y); ctx.stroke();
-                // a signal bead sliding outward: the law expanding downward
-                const u = ((t / 2400) + (s.charCodeAt(6) || 0) / 37) % 1;
-                const qx = (1 - u) * (1 - u) * a.x + 2 * (1 - u) * u * (mx + oy) + u * u * b.x;
-                const qy = (1 - u) * (1 - u) * a.y + 2 * (1 - u) * u * (my - ox) + u * u * b.y;
-                ctx.fillStyle = rgba(col, 0.55 * k);
-                ctx.beginPath(); ctx.arc(qx, qy, 1.1, 0, TAU); ctx.fill();
-            } else {
-                ctx.setLineDash([2, 3]);
-                ctx.strokeStyle = rgba(COL.amber, 0.38 * k);
-                ctx.lineWidth = 0.9;
-                ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
-            }
+            if (typ === 'op') { ctx.setLineDash([2, 3]); ctx.strokeStyle = rgba(COL.red, 0.28); }
+            else if (typ === 'pr') { ctx.setLineDash([1, 3]); ctx.strokeStyle = INK(0.07); }
+            else if (typ === 'du') ctx.strokeStyle = INK(0.12);
+            else if (typ === 'st') ctx.strokeStyle = INK(0.07);
+            else ctx.strokeStyle = INK(0.03);
+            ctx.lineWidth = 0.75;
+            ctx.beginPath(); ctx.moveTo(a.px, a.py); ctx.lineTo(b.px, b.py); ctx.stroke();
             ctx.restore();
         });
-
-        // agents per node
-        const byNode = new Map();
-        agents.forEach(ag => { if (!byNode.has(ag.node)) byNode.set(ag.node, []); byNode.get(ag.node).push(ag); });
-
-        // nodes
+        // AX nodes: filled squares for clauses, hollow for moduli and operations, green when added
         hover = null;
-        for (const nd of nodes.values()) {
-            const p = pos.get(nd.id);
-            if (!p) continue;
-            const k = ease((t - nd.born) / 500) * fade(nd, t);
-            if (k <= 0) continue;
-            const col = levels[p.li] ? levels[p.li].color : COL.white;
-            const size = 2.6 + (n - p.li) * 0.5;
-            const isHover = mouse && Math.hypot(mouse.x - p.x, mouse.y - p.y) < 9;
-            if (isHover) hover = { nd, p };
-            const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, size * 4);
-            g.addColorStop(0, rgba(col, 0.35 * k));
-            g.addColorStop(1, 'transparent');
-            ctx.fillStyle = g;
-            ctx.beginPath(); ctx.arc(p.x, p.y, size * 4, 0, TAU); ctx.fill();
-            ctx.fillStyle = rgba(mix(col, COL.white, isHover ? 0.6 : 0.25), k);
-            ctx.beginPath(); ctx.arc(p.x, p.y, size * (isHover ? 1.6 : 1) * (0.6 + 0.4 * k), 0, TAU); ctx.fill();
-
-            (byNode.get(nd.id) || []).forEach(ag => {
-                const ar = size + 4 + ag.gen * 2.5;
-                const aa = ag.phase + (t / 1000) * ag.speed * (ag.gen ? -1.4 : 1);
-                ctx.fillStyle = ag.gen ? rgba(COL.amber, 0.9 * k) : rgba(COL.white, 0.7 * k);
-                ctx.beginPath(); ctx.arc(p.x + Math.cos(aa) * ar, p.y + Math.sin(aa) * ar, ag.gen ? 1.3 : 1, 0, TAU); ctx.fill();
-            });
+        for (const n of ax.values()) {
+            const k = ease((t - n.born) / 500);
+            const isHover = mouse && Math.hypot(mouse.x - n.x, mouse.y - n.y) < 8;
+            if (isHover) hover = { kind: 'ax', n };
+            const s = isHover ? 3.5 : 2.3;
+            const hollow = !n.rsi && (n.group === 'op' || n.ref.includes('#mod'));
+            if (hollow) {
+                ctx.strokeStyle = INK(0.5 * k);
+                ctx.lineWidth = 1;
+                ctx.strokeRect(n.x - s, n.y - s, s * 2, s * 2);
+            } else {
+                ctx.fillStyle = n.rsi ? rgba(COL.green, 0.95 * k) : INK(0.62 * k);
+                ctx.fillRect(n.x - s, n.y - s, s * 2, s * 2);
+            }
+            if (W >= 700 && n.group !== 'op' && !n.ref.includes('#mod')) {
+                const id = (n.ref.split('/').pop() || '').slice(0, 6);
+                ctx.font = '9px Menlo, Consolas, monospace';
+                ctx.textAlign = Math.cos(n.angle) > 0.2 ? 'left' : Math.cos(n.angle) < -0.2 ? 'right' : 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = n.rsi ? rgba(COL.green, 0.7 * k) : INK(0.35 * k);
+                ctx.fillText(id, n.x + Math.cos(n.angle) * 9, n.y + Math.sin(n.angle) * 9);
+            }
         }
-        for (const [id, nd] of nodes) if (nd.dying && t - nd.dying > 900) nodes.delete(id);
+        // agents: solid dots, brighter with rank; red while leaking, green while stocking
+        for (const ag of agents.values()) {
+            if (ag.tx === undefined) continue;
+            ag.px += (ag.tx - ag.px) * 0.08;
+            ag.py += (ag.ty - ag.py) * 0.08;
+            const k = ease((t - ag.born) / 500);
+            const size = RANK_SIZE[ag.rank] || 2.5;
+            const isHover = mouse && Math.hypot(mouse.x - ag.px, mouse.y - ag.py) < size + 4;
+            if (isHover) hover = { kind: 'agent', ag };
+            const col = ag.state === 'leak' ? COL.red : ag.state === 'stock' ? COL.green : null;
+            ctx.fillStyle = col ? rgba(col, 0.95 * k) : INK((RANK_ALPHA[ag.rank] || 0.5) * k);
+            ctx.beginPath(); ctx.arc(ag.px, ag.py, size, 0, TAU); ctx.fill();
+            if (isHover) {
+                ctx.strokeStyle = INK(0.8);
+                ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.arc(ag.px, ag.py, size + 3, 0, TAU); ctx.stroke();
+            }
+        }
         canvas.style.cursor = hover ? 'pointer' : 'default';
         renderTip();
-
-        // capacity ripples from the lattice core
-        ripples = ripples.filter(rp => t - rp.t < 1800);
+        // travelling links: a hairline drawn from source to target, then faded
+        pulses = pulses.filter(p => t - p.t < p.dur + 300);
+        pulses.forEach(p => {
+            const u = ease((t - p.t) / p.dur);
+            const x = p.from.x + (p.to.x - p.from.x) * u;
+            const y = p.from.y + (p.to.y - p.from.y) * u;
+            const fade = 1 - Math.max(0, (t - p.t - p.dur) / 300);
+            ctx.strokeStyle = rgba(p.col, 0.6 * fade);
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(p.from.x, p.from.y); ctx.lineTo(x, y); ctx.stroke();
+            ctx.fillStyle = rgba(p.col, 0.9 * fade);
+            ctx.beginPath(); ctx.arc(x, y, 1.6, 0, TAU); ctx.fill();
+        });
+        // event marks: one thin ring that opens and fades
+        flashes = flashes.filter(f => t - f.t < 700);
+        flashes.forEach(f => {
+            const k = (t - f.t) / 700;
+            ctx.strokeStyle = rgba(f.col, 0.6 * (1 - k));
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(f.x, f.y, 5 + 9 * ease(k), 0, TAU); ctx.stroke();
+        });
+        // core: the local driver. The accent arc is the clamped LoRA scale.
+        const cr = 8;
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = INK(0.3);
+        ctx.beginPath(); ctx.arc(cx, cy, cr, 0, TAU); ctx.stroke();
+        if (clampScale > 0) {
+            ctx.strokeStyle = rgba(COL.violet, 0.95);
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(cx, cy, cr, -Math.PI / 2, -Math.PI / 2 + TAU * Math.min(1, clampScale)); ctx.stroke();
+        }
+        ripples = ripples.filter(rp => t - rp.t < 900);
         ripples.forEach(rp => {
-            const k = (t - rp.t) / 1800;
-            ctx.strokeStyle = rgba(rp.color, 0.45 * (1 - k));
-            ctx.lineWidth = 2 * (1 - k) + 0.5;
-            ctx.beginPath(); ctx.arc(cx, cy, 6 + ease(k) * R * 0.95, 0, TAU); ctx.stroke();
+            const k = (t - rp.t) / 900;
+            ctx.strokeStyle = rgba(rp.col, 0.6 * (1 - k));
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(cx, cy, cr + 4 + 12 * ease(k), 0, TAU); ctx.stroke();
         });
-
-        // core: the compact law itself
-        const pulse = 0.5 + 0.5 * Math.sin(t / 700);
-        const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, 18);
-        cg.addColorStop(0, `rgba(255,255,255,${0.75 + 0.2 * pulse})`);
-        cg.addColorStop(0.4, rgba(COL.violet, 0.5));
-        cg.addColorStop(1, 'transparent');
-        ctx.fillStyle = cg;
-        ctx.beginPath(); ctx.arc(cx, cy, 18, 0, TAU); ctx.fill();
-    }
-
-    function fade(nd, t) { return nd.dying ? Math.max(0, 1 - (t - nd.dying) / 900) : 1; }
-
-    function proposalTargets() {
-        const groups = { mutation_proposal: [], fitness: [], rectify: [] };
-        const t = now();
-        for (const p of props.values()) {
-            if (absorbed.has(p.id) || shed.has(p.id)) continue;
-            if (p.status === 'proposed') groups.mutation_proposal.push(p);
-            else if (p.status === 'accepted') (active === 'rectify' ? groups.rectify : groups.fitness).push(p);
-            else groups.fitness.push(p);
-        }
-        Object.entries(groups).forEach(([stage, list]) => {
-            const s = stages[stage];
-            list.forEach((p, k) => {
-                const row = Math.floor(k / 9), col = k % 9, inRow = Math.min(9, list.length - row * 9);
-                const a = s.angle + (col - (inRow - 1) / 2) * 0.085;
-                const r = R + 30 + row * 12;
-                p.tx = cx + Math.cos(a) * r; p.ty = cy + Math.sin(a) * r;
-            });
-        });
-        for (const p of props.values()) {
-            if (absorbed.has(p.id)) { p.tx = cx; p.ty = cy; }
-            if (shed.has(p.id) && p.tx !== undefined) {
-                const dx = p.x - cx, dy = p.y - cy, d = Math.hypot(dx, dy) || 1;
-                p.tx = p.x + dx / d * 3; p.ty = p.y + dy / d * 3;
-            }
-        }
-        return t;
-    }
-
-    function drawSwarm(t) {
-        proposalTargets();
-        for (const [id, p] of props) {
-            if (p.tx === undefined) continue;
-            const sp = absorbed.has(id) ? 0.05 : 0.09;
-            p.x += (p.tx - p.x) * sp; p.y += (p.ty - p.y) * sp;
-            let a = ease((t - p.born) / 500);
-            if (absorbed.has(id)) a *= Math.max(0, 1 - (t - p.absorbAt) / 1600);
-            if (shed.has(id)) a *= Math.max(0, 1 - (t - p.shedAt) / 1800);
-            if (a <= 0.01 && (absorbed.has(id) || shed.has(id)) && t - p.born > 1000) { props.delete(id); continue; }
-            const col = p.status === 'accepted' ? COL.green : p.status === 'rejected' ? COL.red : COL.white;
-            const s = p.op === 'rewire_topology' ? 3.6 : 3;
-            ctx.save();
-            ctx.translate(p.x, p.y);
-            ctx.rotate(Math.PI / 4 + (p.op === 'rewire_topology' ? t / 600 : 0));
-            ctx.fillStyle = rgba(col, 0.85 * a);
-            ctx.fillRect(-s / 2, -s / 2, s, s);
-            ctx.strokeStyle = rgba(col, 0.35 * a);
-            ctx.strokeRect(-s, -s, s * 2, s * 2);
-            ctx.restore();
-            if (absorbed.has(id) && a > 0.05) {
-                ctx.strokeStyle = rgba(COL.green, 0.12 * a);
-                ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(cx, cy); ctx.stroke();
-            }
-        }
     }
 
     function renderTip() {
         if (!tip) return;
         if (!hover) { tip.classList.remove('is-visible'); return; }
-        const { nd, p } = hover;
-        const ag = agents.filter(a => a.node === nd.id);
-        const lv = levels[p.li] || {};
-        tip.innerHTML =
-            `<b>${nd.id}</b><span>${lv.id || nd.level} · ${escapeHtml(lv.name || '')}</span>` +
-            `<span>rule <code>${escapeHtml(nd.rule)}</code></span>` +
-            `<span>${ag.length} inhabitant${ag.length === 1 ? '' : 's'}${ag.some(a => a.gen) ? ' · spawned' : ''}</span>`;
-        tip.style.left = Math.min(W - 200, p.x + 14) + 'px';
-        tip.style.top = Math.max(8, p.y - 12) + 'px';
+        let html = '';
+        let x = 0, y = 0;
+        if (hover.kind === 'agent') {
+            const a = hover.ag;
+            x = a.px; y = a.py;
+            html = `<b>${esc(a.id)} · ${esc(a.state)}</b><code class="rsi-tip__name">${esc(a.name)}</code>`
+                + `<span>${esc(a.hero)} · ${esc(a.rank)}</span>`
+                + `<span>S ${a.S} · L ${a.L} · x ${a.x}</span>`
+                + (a.ax ? `<span>⟼ ${esc(a.ax)}</span>` : '');
+        } else {
+            const n = hover.n;
+            x = n.x; y = n.y;
+            html = `<b>${esc(n.ref)}</b><span>${esc((n.text || '').slice(0, 160))}</span>` + (n.rsi ? '<span class="rsi-tip__rsi">added by the loop</span>' : '');
+        }
+        tip.innerHTML = html;
+        tip.style.left = Math.max(8, Math.min(W - 260, x + 14)) + 'px';
+        tip.style.top = Math.max(8, Math.min(H - 120, y - 12)) + 'px';
         tip.classList.add('is-visible');
-    }
-
-    function escapeHtml(s) {
-        return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     }
 
     function frame() {
@@ -687,26 +555,25 @@ const RsiLattice = (() => {
         if (!mount || mount.offsetParent === null || document.hidden) return;
         const t = now();
         stepComet();
-        drawBackground(t);
-        drawLattice(t);
+        drawBackground();
+        drawDomains(t);
         drawLoop(t);
-        drawSwarm(t);
-        drawComet();
+        drawMarker();
         drawStages(t);
     }
 
-    // ── HUD ──────────────────────────────────────────────────────────────
     function updateHud() {
         if (!hud.version) return;
         hud.version.textContent = version && version !== 'v-none' ? version : '—';
         hud.loop.textContent = running || iteration ? `loop ${Math.min(iteration + (running ? 1 : 0), maxIter)} / ${maxIter}` : 'idle';
+        hud.posture.textContent = posture ? Number(posture.score).toFixed(3) : '—';
+        hud.contra.textContent = posture ? `${posture.contradictions} contradiction${posture.contradictions === 1 ? '' : 's'}` : '';
         const meta = active ? STAGE_META[active] : null;
-        hud.stage.textContent = meta ? meta.label : (running ? '…' : (iteration ? 'converged' : 'awaiting a formal artifact'));
-        hud.hint.textContent = meta ? meta.hint : (iteration ? 'the lattice has absorbed its accepted mutations' : 'paste a law, a spec, a repo — any generative formal system');
+        hud.stage.textContent = meta ? meta.label : (running ? '…' : (iteration ? 'converged' : 'awaiting a security policy'));
+        hud.hint.textContent = meta ? meta.hint : (iteration ? 'findings, controls and the hardened policy are below' : 'paste a policy, a runbook or a standard');
         hud.root.classList.toggle('is-running', running);
     }
 
-    // ── public API ───────────────────────────────────────────────────────
     function init(el, opts = {}) {
         mount = typeof el === 'string' ? document.getElementById(el) : el;
         if (!mount) return;
@@ -715,22 +582,26 @@ const RsiLattice = (() => {
         mount.classList.add('rsi-lattice');
         mount.innerHTML = `
             <canvas class="rsi-lattice__canvas"></canvas>
-            <div class="rsi-lattice__grain"></div>
             <div class="rsi-lattice__hud">
                 <div class="rsi-hud__corner">
-                    <span class="rsi-hud__eyebrow">lattice</span>
+                    <span class="rsi-hud__eyebrow">policy</span>
                     <span class="rsi-hud__version" data-k="version">—</span>
                     <span class="rsi-hud__loop" data-k="loop">idle</span>
+                </div>
+                <div class="rsi-hud__corner rsi-hud__corner--right">
+                    <span class="rsi-hud__eyebrow">posture</span>
+                    <span class="rsi-hud__version" data-k="posture">—</span>
+                    <span class="rsi-hud__loop" data-k="contra"></span>
                 </div>
                 <div class="rsi-hud__stage">
                     <span class="rsi-hud__stage-name" data-k="stage"></span>
                     <span class="rsi-hud__stage-hint" data-k="hint"></span>
                 </div>
                 <div class="rsi-hud__legend">
-                    <span><i class="rsi-dot rsi-dot--node"></i>instantiation</span>
-                    <span><i class="rsi-dot rsi-dot--agent"></i>agent</span>
-                    <span><i class="rsi-dot rsi-dot--spawn"></i>spawned</span>
-                    <span><i class="rsi-dot rsi-dot--prop"></i>mutation</span>
+                    <span><i class="rsi-dot rsi-dot--leak"></i>leaking</span>
+                    <span><i class="rsi-dot rsi-dot--stock"></i>stocking</span>
+                    <span><i class="rsi-chord"></i>contradiction</span>
+                    <span><i class="rsi-sq rsi-sq--rsi"></i>control added</span>
                 </div>
             </div>
             <div class="rsi-lattice__tip"></div>`;
@@ -739,7 +610,6 @@ const RsiLattice = (() => {
         tip = mount.querySelector('.rsi-lattice__tip');
         hud = { root: mount.querySelector('.rsi-lattice__hud') };
         mount.querySelectorAll('[data-k]').forEach(n => { hud[n.dataset.k] = n; });
-
         canvas.addEventListener('mousemove', e => {
             const r = canvas.getBoundingClientRect();
             mouse = { x: e.clientX - r.left, y: e.clientY - r.top };
@@ -754,10 +624,10 @@ const RsiLattice = (() => {
     }
 
     function reset() {
-        queue = []; active = null; levels = []; nodes = new Map(); edges = []; agents = [];
-        props = new Map(); absorbed = new Set(); shed = new Set(); ripples = []; echoes = []; flashes = [];
-        version = null; iteration = 0; trail = [];
-        Object.values(stages).forEach(s => { s.done = 0; s.glow = 0; });
+        queue = []; active = null; ax = new Map(); agents = new Map(); edges = []; toc = []; chords = [];
+        pulses = []; ripples = []; flashes = []; seen = new Set();
+        version = null; iteration = 0; posture = null; clampScale = 0;
+        Object.values(stages).forEach(s => { s.done = 0; });
         comet = { mode: 'tail', s: 0, ts: 0 };
         running = true;
         layout();
@@ -779,6 +649,7 @@ const RsiLattice = (() => {
         isRunning: () => running,
         STAGES: [...TAIL, ...LOOP],
         STAGE_META,
+        SPECIES_COL,
     };
 })();
 

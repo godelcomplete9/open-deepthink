@@ -121,7 +121,7 @@ async def run_rsi(
     raw_text: str,
     params: dict[str, Any] | None = None,
     *,
-    law_title: str = "untitled-law",
+    law_title: str = "untitled-policy",
     iterations: int = 1,
     mutators: int | None = None,
     artifact_path: str = "",
@@ -129,23 +129,20 @@ async def run_rsi(
     session_id: str = "",
     session_store: dict | None = None,
     on_event=None,
+    mapper_llm=None,
+    editor_llm=None,
 ) -> dict[str, Any]:
     """
-    Run the RSI (recursive self-improvement) loop over a formal artifact.
+    Run the RSI loop for cybersecurity over an institution's security policy.
 
-    The fourth open-deepthink section: RSI over artifacts that follow formal
-    structures (code repositories, math models, physics models, documentation).
-
-    Thin alias of :func:`deepthink.nomosloop.run_rsi_pipeline`.
+    ``llm`` is the local driver (llama.cpp, in-process, or ``None`` offline);
+    ``editor_llm`` optionally writes weight programs for the LoRA adapter
+    (``params["lora"]["program"] = {"enabled": True, ...}``).
+    ``mapper_llm`` optionally builds the table of correspondences. Leak-driven
+    runs (``params={"drive": "leak"}``) produce inspection findings;
+    stock-driven runs (``"stock"``) evolve the policy with posture-gated
+    controls. Thin alias of :func:`deepthink.nomosloop.run_rsi_pipeline`.
     """
-    # Merge explicit kwargs under any caller-supplied params (params win).
-    p = {
-        "law_title": law_title,
-        "iterations": iterations,
-        "mutators": mutators,
-        "artifact_path": artifact_path,
-        **(params or {}),
-    }
     return await run_rsi_pipeline(
         llm,
         raw_text,
@@ -153,11 +150,13 @@ async def run_rsi(
         iterations=iterations,
         mutators=mutators,
         artifact_path=artifact_path,
-        params=p,
+        params=params,
         log=log,
         session_id=session_id,
         session_store=session_store,
         on_event=on_event,
+        mapper_llm=mapper_llm,
+        editor_llm=editor_llm,
     )
 
 

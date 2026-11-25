@@ -1,0 +1,19 @@
+NETWORK SEGMENTATION STANDARD (illustrative; contains deliberate defects)
+
+PRINCIPLES
+1. Objective: limit lateral movement so that a compromised workstation cannot reach production systems. This standard applies to every network zone.
+
+ZONES
+2. The management VLAN is open to all traffic from the office network for convenience.
+3. Inbound connections to the management VLAN are prohibited except from the jump host.
+4. Production databases accept connections only from the application tier.
+5. Guest Wi-Fi is always allowed to reach the printers on the office network.
+6. The office network must never route traffic from guest Wi-Fi.
+
+CONTROLS
+7. East-west traffic between zones is logged at the core firewall and reviewed weekly.
+8. Firewall rule changes require a ticket and approval from the network owner.
+9. Intrusion detection sensors monitor the production zone and alert the security team.
+
+ASSETS
+10. Zones: office network, guest Wi-Fi, management VLAN, application tier, production databases, jump host.

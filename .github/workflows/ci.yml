@@ -59,15 +59,15 @@ jobs:
           OPENROUTER_API_KEY: ""
         run: python tests/run_all.py
 
-      - name: RSI smoke (offline, no API keys)
+      - name: RSI security smoke (offline, no API keys)
         env:
           OPENROUTER_API_KEY: ""
           NOMOSLOOP_OFFLINE: "1"
         run: |
-          deepthink rsi --input examples/binary_decimal_fragment.txt \
-            --title ci-rsi --iterations 1 --mutators 2 --offline \
-            --artifact artifacts/artifact_ci_rsi.py --json-out rsi_result.json
-          python -m deepthink.nomosloop.benchmark examples/binary_decimal_fragment.txt
+          deepthink rsi --input examples/security/institution_access_policy.txt \
+            --title ci-rsi --iterations 2 --drive leak --offline \
+            --artifact artifacts/ci_rsi.md --json-out rsi_result.json
+          python -m deepthink.nomosloop.benchmark
 
       - name: Verify entry points resolve
         run: |

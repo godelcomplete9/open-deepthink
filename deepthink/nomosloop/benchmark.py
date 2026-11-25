@@ -1,90 +1,98 @@
-"""RSI benchmark: scoreboard vs a no-mutation baseline.
+"""RSI benchmark: the security loop under each drive, offline.
 
-Runs the same formal text through the loop twice:
-- baseline: mutators=0, one iteration  (induction only, lattice v0);
-- evolved:  mutators=6, two iterations (proposal -> measured fitness -> gate).
+For every policy given (default: ``examples/security/*.txt``) it runs the
+loop under the leak, balanced and stock drives and reports:
 
-Metrics per case: measured capacity (executed enumeration), distinct ground
-instances, holdout-motif coverage, accepted mutations, rollbacks, iterations.
-Exits non-zero if evolved capacity falls below the baseline (regression).
+- posture before and after (function diversity over contradictions);
+- contradictory clause pairs found in the policy;
+- findings (leak-driven heals) and controls kept (stock-driven edits);
+- ensemble leak ``L_G`` and coverage (covered clause × function cells);
+- chain-of-thought rounds per solve.
 
-Run:  python -m deepthink.nomosloop.benchmark [input.txt]
+Exits non-zero if any run ends with a lower posture than it started with:
+the stock gate must make that impossible.
+
+Run:  python -m deepthink.nomosloop.benchmark [policy.txt ...]
 """
 
 from __future__ import annotations
 
+import glob
 import os
 import sys
 import tempfile
 
-from .graph import describe_topology, run_pipeline, set_topology
+from .graph import run_pipeline
+from .world import World
+
+DRIVES = ("leak", "bal", "stock")
 
 
-def run_case(input_path: str, mutators: int, iterations: int, workdir: str) -> dict:
+def run_case(path: str, drive: str, iterations: int, workdir: str) -> dict:
     from .ingest import load_formal_text
 
-    snapshot = describe_topology()
+    raw = load_formal_text(path)
+    name = os.path.splitext(os.path.basename(path))[0]
+    old = os.environ.get("NOMOSLOOP_OFFLINE")
+    os.environ["NOMOSLOOP_OFFLINE"] = "1"
     try:
-        raw = load_formal_text(input_path)
-        artifact = os.path.join(workdir, f"bench_m{mutators}.py")
         final = run_pipeline(
             raw,
-            law_title=f"bench-m{mutators}",
+            law_title=name,
             max_iterations=iterations,
-            artifact_path=artifact,
-            mutators=mutators,
+            artifact_path=os.path.join(workdir, f"{name}_{drive}.md"),
+            rsi_cfg={"drive": drive, "cot": False},
         )
     finally:
-        set_topology(snapshot)
-    caps = final.get("capacity_history", [])
-    last = caps[-1] if caps else {}
+        if old is None:
+            os.environ.pop("NOMOSLOOP_OFFLINE", None)
+        else:
+            os.environ["NOMOSLOOP_OFFLINE"] = old
+    post = final.get("posture_history", []) or [{}]
+    world = final.get("world")
+    w = world if isinstance(world, World) else None
     return {
-        "case": f"m={mutators},i={iterations}",
-        "capacity": float(last.get("capacity", 0.0)),
-        "instances": int(last.get("instances", 0)),
-        "coverage": float(last.get("coverage", 0.0)),
-        "accepted": len(final.get("accepted_mutations", []) or []),
-        "rollbacks": len(final.get("rollbacks", []) or []),
-        "topology_patches": sum(
-            1 for p in (final.get("topology_history") or []) if p.get("applied")
-        ),
-        "iterations": int(final.get("iteration", 0)),
-        "lattice": final.get("scale_lattice", {}).get("version"),
-        "artifact": artifact,
+        "case": f"{name[:22]}/{drive}",
+        "posture_0": float(post[0].get("score", 0.0)),
+        "posture": float(post[-1].get("score", 0.0)),
+        "contra": int(post[0].get("contradictions", 0)),
+        "findings": len(w.inspections) if w else 0,
+        "controls": len(final.get("controls", []) or []),
+        "L_G": round(w.ensemble_leak(), 3) if w else 0.0,
+        "space": w.coverage_history[-1]["space"] if w and w.coverage_history else 0,
+        "rps": round(w.rounds_per_solve(), 2) if w else 0.0,
     }
 
 
 def format_table(rows: list) -> str:
-    head = f"{'case':<22}{'capacity':>10}{'instances':>11}{'coverage':>10}{'accepted':>10}{'rolled':>8}{'iter':>6}"
+    head = f"{'case':<32}{'posture':>16}{'contra':>8}{'finds':>7}{'ctrls':>7}{'L_G':>7}{'space':>7}{'rps':>7}"
     lines = [head, "-" * len(head)]
     for r in rows:
         lines.append(
-            f"{r['case']:<22}{r['capacity']:>10.3f}{r['instances']:>11}"
-            f"{r['coverage']:>10.2f}{r['accepted']:>10}{r['rollbacks']:>8}{r['iterations']:>6}"
+            f"{r['case']:<32}{r['posture_0']:>7.3f} -> {r['posture']:<6.3f}{r['contra']:>8}{r['findings']:>7}"
+            f"{r['controls']:>7}{r['L_G']:>7.3f}{r['space']:>7}{r['rps']:>7.2f}"
         )
     return "\n".join(lines)
 
 
 def main(argv=None) -> int:
-    argv = argv if argv is not None else sys.argv[1:]
-    input_path = argv[0] if argv else os.path.join("examples", "binary_decimal_fragment.txt")
-    if not os.path.isfile(input_path):
-        print(f"[bench] input not found: {input_path}", file=sys.stderr)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    paths = argv or sorted(glob.glob(os.path.join("examples", "security", "*.txt")))
+    if not paths:
+        print("no policies given and none found in examples/security", file=sys.stderr)
         return 2
-    with tempfile.TemporaryDirectory(prefix="nomosloop_bench_") as workdir:
-        baseline = run_case(input_path, mutators=0, iterations=1, workdir=workdir)
-        evolved = run_case(input_path, mutators=6, iterations=2, workdir=workdir)
-    print(f"[bench] input: {input_path}")
-    print(format_table([baseline, evolved]))
-    delta = evolved["capacity"] - baseline["capacity"]
-    verdict = "PASS" if delta >= -1e-9 else "FAIL"
-    print(
-        f"[bench] {verdict}: measured capacity delta {delta:+.3f} "
-        f"({baseline['capacity']:.3f} -> {evolved['capacity']:.3f}), "
-        f"instances {baseline['instances']} -> {evolved['instances']}, "
-        f"rollbacks={evolved['rollbacks']}, topology patches kept={evolved['topology_patches']}"
-    )
-    return 0 if verdict == "PASS" else 1
+    rows = []
+    with tempfile.TemporaryDirectory() as workdir:
+        for path in paths:
+            for drive in DRIVES:
+                rows.append(run_case(path, drive, iterations=3, workdir=workdir))
+    print(format_table(rows))
+    bad = [r for r in rows if r["posture"] + 1e-9 < r["posture_0"]]
+    if bad:
+        print(f"REGRESSION: posture fell in {[r['case'] for r in bad]}", file=sys.stderr)
+        return 1
+    print("ok: no posture regression")
+    return 0
 
 
 if __name__ == "__main__":
