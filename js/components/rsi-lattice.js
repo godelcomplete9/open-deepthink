@@ -1,27 +1,29 @@
 /**
  * RsiLattice: "Ouroboros Lattice" for the RSI security loop.
  *
+ * A flat line drawing: hairlines, solid dots, one accent colour for the loop's
+ * progress, and red / green only where they mean leak / stock.
+ *
  *   • Ring   = the loop. The five looping stages (correspond, tick, heal,
  *              stock, lora) sit on a circle; ingest and scale induction
- *              spiral into it as a tail. A comet marks the active node and
- *              each finished loop leaves an echo orbit.
+ *              spiral into it as a tail. A dot travels the ring and the
+ *              accent arc shows how far the current pass has gone.
  *   • AX band (outer)   = the security policy: clauses grouped by level
  *              (principles, policies, controls, assets) and the viable control
  *              operations. Contradictory clauses are joined by red chords.
- *              Controls added by the loop are born here in green.
+ *              Controls added by the loop appear in green.
  *   • TC spokes         = the table of correspondences: one gauge link from
- *              each clause to its agent, tinted by its phase A (aligned or not).
- *   • AM lattice (inner) = Agent Mechanics agents, coloured by hero species,
- *              placed on their clause's spoke at a radius set by rank (Attr
- *              near the core, Inr near the band). A red halo means the agent
- *              leaks; a green halo means it stocks. Typed edges are drawn in
- *              the lattice: stems and duals in species colour, hostile (op)
- *              edges dashed red, parentage (pr) amber.
+ *              each clause to its agent; a twisted link (cos A <= 0) is red.
+ *   • AM lattice (inner) = Agent Mechanics agents, placed on their clause's
+ *              spoke at a radius set by rank (Attr near the core, Inr near the
+ *              band) and drawn brighter with rank. A leaking agent is red; a
+ *              stocking agent is green. Hostile (op) edges are dashed red.
  *
- * Heals flash red from the agent out along its spokes to the clashing
- * clauses. Kept controls travel green from the stocking agent to the band.
- * LoRA clamps pulse the core. Events are replayed with a minimum dwell so the
- * offline engine, which finishes in milliseconds, still reads as a loop.
+ * Heals draw a red line from the agent to the clashing clauses. Kept controls
+ * draw a green line from the stocking agent to the band. The accent arc
+ * around the core is the clamped LoRA scale. Events are replayed with a
+ * minimum dwell so the offline engine, which finishes in milliseconds, still
+ * reads as a loop.
  */
 const RsiLattice = (() => {
     'use strict';
@@ -67,8 +69,6 @@ const RsiLattice = (() => {
     let tailPts = [];
     let active = null;
     let comet = null;
-    let trail = [];
-    let echoes = [];
     let ripples = [];
     let flashes = [];
     let pulses = [];      // travelling light {from:{x,y}, to:{x,y}, t, col}
@@ -99,7 +99,7 @@ const RsiLattice = (() => {
         cy = H / 2 + 6;
         LOOP.forEach((name, i) => {
             const a = -Math.PI / 2 + i * TAU / LOOP.length;
-            stages[name] = { ...(stages[name] || { glow: 0, done: 0 }), x: cx + Math.cos(a) * R, y: cy + Math.sin(a) * R, angle: a };
+            stages[name] = { ...(stages[name] || { done: 0 }), x: cx + Math.cos(a) * R, y: cy + Math.sin(a) * R, angle: a };
         });
         tailPts = [];
         const th0 = -Math.PI / 2, th1 = -Math.PI * 0.985, k = 0.48;
@@ -110,8 +110,8 @@ const RsiLattice = (() => {
             tailPts.push({ x: cx + Math.cos(th) * r, y: cy + Math.sin(th) * r, s });
         }
         const at = s => tailPts[Math.round(s * 80)];
-        stages.ingest = { ...(stages.ingest || { glow: 0, done: 0 }), ...at(0), angle: th1, s: 0 };
-        stages.scale_induction = { ...(stages.scale_induction || { glow: 0, done: 0 }), ...at(0.52), angle: th1, s: 0.52 };
+        stages.ingest = { ...(stages.ingest || { done: 0 }), ...at(0), angle: th1, s: 0 };
+        stages.scale_induction = { ...(stages.scale_induction || { done: 0 }), ...at(0.52), angle: th1, s: 0.52 };
         placeAx();
     }
 
@@ -212,9 +212,9 @@ const RsiLattice = (() => {
             const to = n ? { x: n.x, y: n.y } : { x: cx, y: cy - R * 0.8 };
             pulses.push({ from: { x: ag.px, y: ag.py }, to, t, col: COL.green, dur: 1000 });
         } else if (ev.kind === 'clamp') {
-            ripples.push({ t, col: ev.decision === 'rollback' ? COL.amber : COL.violet });
+            ripples.push({ t, col: ev.decision === 'rollback' ? COL.white : COL.violet });
         } else if (ev.kind === 'brk' && ag) {
-            flashes.push({ x: ag.px, y: ag.py, col: COL.amber, t });
+            flashes.push({ x: ag.px, y: ag.py, col: COL.white, t });
         }
     }
 
@@ -251,7 +251,6 @@ const RsiLattice = (() => {
         } else {
             const s = stages[ev.node];
             if (s) s.done += 1;
-            if (ev.node === 'lora') echoes.push({ t: now() });
             applySnapshot(ev.state);
         }
         updateHud();
@@ -278,7 +277,18 @@ const RsiLattice = (() => {
         comet.ta = target;
     }
 
-    // ── render ───────────────────────────────────────────────────────────
+    // ── render: a flat line drawing (hairlines, solid dots, no glow) ─────
+    const INK = a => `rgba(255,255,255,${a})`;
+    const BG = '#08080a';
+    const RANK_ALPHA = { Attr: 0.85, Cyc: 0.7, Res: 0.58, Seed: 0.48, Inr: 0.38 };
+    const RANK_SIZE = { Attr: 4, Cyc: 3.4, Res: 2.9, Seed: 2.5, Inr: 2 };
+
+    function markerPoint() {
+        if (!comet) return null;
+        if (comet.mode === 'tail') return tailPts[Math.round(Math.min(1, Math.max(0, comet.s)) * 80)];
+        return { x: cx + Math.cos(comet.a) * R, y: cy + Math.sin(comet.a) * R };
+    }
+
     function stepComet() {
         if (!comet) return;
         if (comet.mode === 'tail') {
@@ -291,141 +301,96 @@ const RsiLattice = (() => {
             const d = comet.ta - comet.a;
             comet.a += d * 0.07 + (d > 0.001 ? 0.004 : 0);
             if (comet.a > comet.ta) comet.a = comet.ta;
-            if (!running && !active) comet.ta += 0.006;
+            if (!running && !active) comet.ta += 0.004;
         }
-        const p = comet.mode === 'tail'
-            ? tailPts[Math.round(Math.min(1, Math.max(0, comet.s)) * 80)]
-            : { x: cx + Math.cos(comet.a) * R, y: cy + Math.sin(comet.a) * R };
-        if (p) { trail.push({ x: p.x, y: p.y }); if (trail.length > 42) trail.shift(); }
     }
 
     function drawBackground() {
-        ctx.fillStyle = '#040405';
-        ctx.fillRect(0, 0, W, H);
-        const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, R * 1.6);
-        g.addColorStop(0, 'rgba(139,92,246,0.09)');
-        g.addColorStop(0.5, 'rgba(59,130,246,0.035)');
-        g.addColorStop(1, 'transparent');
-        ctx.fillStyle = g;
+        ctx.fillStyle = BG;
         ctx.fillRect(0, 0, W, H);
     }
 
-    function drawLoop(t) {
-        echoes.forEach((e, i) => {
-            const age = ease((t - e.t) / 1200);
-            ctx.save();
-            ctx.setLineDash([2, 6]);
-            ctx.lineDashOffset = -t / 60 * (i % 2 ? 1 : -1);
-            ctx.strokeStyle = rgba(COL.violet, 0.22 * age);
-            ctx.lineWidth = 1;
-            ctx.beginPath(); ctx.arc(cx, cy, (R + 16 + i * 7) * (0.9 + 0.1 * age), 0, TAU); ctx.stroke();
-            ctx.restore();
-        });
-        ctx.lineWidth = 1.4;
-        const grad = ctx.createLinearGradient(cx - R, cy - R, cx + R, cy + R);
-        grad.addColorStop(0, rgba(COL.violet, 0.55));
-        grad.addColorStop(1, rgba(COL.cyan, 0.4));
-        ctx.strokeStyle = grad;
+    function drawLoop() {
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = INK(0.16);
         ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.stroke();
-        ctx.save();
-        ctx.setLineDash([1, 14]);
-        ctx.lineDashOffset = -t / 40;
-        ctx.strokeStyle = 'rgba(255,255,255,0.35)';
-        ctx.lineWidth = 2;
-        ctx.beginPath(); ctx.arc(cx, cy, R, 0, TAU); ctx.stroke();
-        ctx.restore();
         ctx.beginPath();
         tailPts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
-        const tg = ctx.createLinearGradient(tailPts[0].x, tailPts[0].y, tailPts[80].x, tailPts[80].y);
-        tg.addColorStop(0, 'rgba(255,255,255,0.05)');
-        tg.addColorStop(1, rgba(COL.violet, 0.55));
-        ctx.strokeStyle = tg;
-        ctx.lineWidth = 1.4;
         ctx.stroke();
+        // progress through the current pass, in the accent colour
+        if (running && comet) {
+            ctx.strokeStyle = rgba(COL.violet, 0.9);
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            if (comet.mode === 'tail') {
+                const n = Math.round(Math.min(1, Math.max(0, comet.s)) * 80);
+                for (let i = 0; i <= n; i++) i ? ctx.lineTo(tailPts[i].x, tailPts[i].y) : ctx.moveTo(tailPts[0].x, tailPts[0].y);
+            } else {
+                let p = ((comet.a + Math.PI / 2) % TAU + TAU) % TAU;
+                if (p > TAU - 1e-3) p = 0; // back at correspond: a new pass starts
+                if (p > 1e-3) ctx.arc(cx, cy, R, -Math.PI / 2, -Math.PI / 2 + p);
+            }
+            ctx.stroke();
+        }
+        // direction of travel: one small arrowhead between lora and correspond
         const a = stages.lora.angle + (TAU / 5) * 0.5;
         ctx.save();
         ctx.translate(cx + Math.cos(a) * R, cy + Math.sin(a) * R); ctx.rotate(a + Math.PI / 2);
-        ctx.fillStyle = rgba(COL.violet, 0.8);
-        ctx.beginPath(); ctx.moveTo(5, 0); ctx.lineTo(-4, -4); ctx.lineTo(-4, 4); ctx.closePath(); ctx.fill();
+        ctx.fillStyle = INK(0.45);
+        ctx.beginPath(); ctx.moveTo(4, 0); ctx.lineTo(-3, -3.5); ctx.lineTo(-3, 3.5); ctx.closePath(); ctx.fill();
         ctx.restore();
     }
 
-    function drawStages(t) {
+    function drawMarker() {
+        const p = markerPoint();
+        if (!p) return;
+        ctx.fillStyle = running ? rgba(COL.violet, 1) : INK(0.7);
+        ctx.beginPath(); ctx.arc(p.x, p.y, 3, 0, TAU); ctx.fill();
+    }
+
+    function drawStages() {
         [...TAIL, ...LOOP].forEach(name => {
             const s = stages[name];
             const isActive = active === name;
-            s.glow += ((isActive ? 1 : 0) - s.glow) * 0.08;
-            const r = 7 + s.glow * 3;
-            if (s.glow > 0.02) {
-                const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, 34);
-                g.addColorStop(0, rgba(COL.violet, 0.45 * s.glow));
-                g.addColorStop(1, 'transparent');
-                ctx.fillStyle = g;
-                ctx.beginPath(); ctx.arc(s.x, s.y, 34, 0, TAU); ctx.fill();
-                ctx.strokeStyle = rgba(COL.violet, 0.5 * s.glow);
-                ctx.lineWidth = 1;
-                ctx.beginPath(); ctx.arc(s.x, s.y, r + 6 + 3 * Math.sin(t / 240), 0, TAU); ctx.stroke();
+            ctx.lineWidth = 1;
+            if (isActive) {
+                ctx.strokeStyle = rgba(COL.violet, 0.6);
+                ctx.beginPath(); ctx.arc(s.x, s.y, 9, 0, TAU); ctx.stroke();
             }
-            ctx.fillStyle = '#07070a';
-            ctx.strokeStyle = isActive ? '#fff' : (s.done ? rgba(COL.violet, 0.85) : 'rgba(255,255,255,0.28)');
-            ctx.lineWidth = 1.4;
-            ctx.beginPath(); ctx.arc(s.x, s.y, r, 0, TAU); ctx.fill(); ctx.stroke();
-            if (s.done) {
-                ctx.fillStyle = rgba(COL.violet, 0.9);
-                ctx.beginPath(); ctx.arc(s.x, s.y, 2.6, 0, TAU); ctx.fill();
+            ctx.fillStyle = isActive ? rgba(COL.violet, 1) : BG;
+            ctx.strokeStyle = isActive ? rgba(COL.violet, 1) : INK(s.done ? 0.6 : 0.3);
+            ctx.beginPath(); ctx.arc(s.x, s.y, 4.5, 0, TAU); ctx.fill(); ctx.stroke();
+            if (s.done && !isActive) {
+                ctx.fillStyle = INK(0.6);
+                ctx.beginPath(); ctx.arc(s.x, s.y, 1.8, 0, TAU); ctx.fill();
             }
             if (W < 560 && !isActive) return;
             const dx = s.x - cx, dy = s.y - cy, d = Math.hypot(dx, dy) || 1;
             const label = STAGE_META[name].label.toUpperCase();
-            ctx.font = '600 10px -apple-system, "Segoe UI", sans-serif';
+            ctx.font = '500 10px -apple-system, "Segoe UI", sans-serif';
             if ('letterSpacing' in ctx) ctx.letterSpacing = '1.5px';
             const tw = ctx.measureText(label).width;
-            let lx = s.x + dx / d * 22;
-            const ly = Math.max(10, Math.min(H - 10, s.y + dy / d * 20));
+            let lx = s.x + dx / d * 20;
+            const ly = Math.max(10, Math.min(H - 10, s.y + dy / d * 18));
             const align = Math.abs(dx / d) < 0.3 ? 'center' : (dx > 0 ? 'left' : 'right');
             const left = align === 'center' ? lx - tw / 2 : align === 'left' ? lx : lx - tw;
             lx += Math.max(0, 8 - left) - Math.max(0, left + tw - (W - 8));
             ctx.textAlign = align;
             ctx.textBaseline = 'middle';
-            ctx.fillStyle = isActive ? '#fff' : 'rgba(255,255,255,0.45)';
+            ctx.fillStyle = isActive ? INK(0.92) : INK(0.4);
             ctx.fillText(label, lx, ly);
             if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
         });
     }
 
-    function drawComet() {
-        if (trail.length < 2) return;
-        for (let i = 1; i < trail.length; i++) {
-            const k = i / trail.length;
-            ctx.strokeStyle = `rgba(255,255,255,${0.5 * k * k})`;
-            ctx.lineWidth = 2.5 * k;
-            ctx.beginPath(); ctx.moveTo(trail[i - 1].x, trail[i - 1].y); ctx.lineTo(trail[i].x, trail[i].y); ctx.stroke();
-        }
-        const p = trail[trail.length - 1];
-        const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, 14);
-        g.addColorStop(0, 'rgba(255,255,255,0.95)');
-        g.addColorStop(0.3, rgba(COL.violet, 0.6));
-        g.addColorStop(1, 'transparent');
-        ctx.fillStyle = g;
-        ctx.beginPath(); ctx.arc(p.x, p.y, 14, 0, TAU); ctx.fill();
-    }
-
     function drawDomains(t) {
         const rax = R * 0.8;
-        // AX band and level arcs
-        ctx.save();
-        ctx.setLineDash([1, 5]);
-        ctx.lineDashOffset = t / 90;
-        ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = INK(0.07);
         ctx.beginPath(); ctx.arc(cx, cy, rax, 0, TAU); ctx.stroke();
-        ctx.restore();
         if (!ax.size) {
-            for (let i = 0; i < 4; i++) {
-                ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-                ctx.setLineDash([2, 8]);
-                ctx.beginPath(); ctx.arc(cx, cy, R * (0.2 + 0.13 * i), 0, TAU); ctx.stroke();
-                ctx.setLineDash([]);
-            }
+            ctx.strokeStyle = INK(0.04);
+            for (let i = 0; i < 4; i++) { ctx.beginPath(); ctx.arc(cx, cy, R * (0.2 + 0.13 * i), 0, TAU); ctx.stroke(); }
         }
         // group labels
         if (W >= 560) {
@@ -433,135 +398,133 @@ const RsiLattice = (() => {
                 const nodes = [...ax.values()].filter(n => n.group === g);
                 if (!nodes.length) return;
                 const mid = nodes[Math.floor(nodes.length / 2)].angle;
-                ctx.font = '600 9px -apple-system, "Segoe UI", sans-serif';
+                // outside the band unless a stage node sits there; then just inside it
+                let lr = rax + 22;
+                const near = st => st && Math.hypot(st.x - (cx + Math.cos(mid) * lr), st.y - (cy + Math.sin(mid) * lr)) < 36;
+                if ([...TAIL, ...LOOP].some(name => near(stages[name]))) lr = rax - 16;
+                ctx.font = '500 9px -apple-system, "Segoe UI", sans-serif';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
-                ctx.fillStyle = 'rgba(255,255,255,0.3)';
-                ctx.fillText(`${g === 'op' ? '' : g + ' · '}${GROUP_NAME[g]}`.toUpperCase(), cx + Math.cos(mid) * (rax + 22), cy + Math.sin(mid) * (rax + 22));
+                ctx.fillStyle = INK(0.28);
+                ctx.fillText(`${g === 'op' ? '' : g + ' · '}${GROUP_NAME[g]}`.toUpperCase(), cx + Math.cos(mid) * lr, cy + Math.sin(mid) * lr);
             });
         }
-        // TC spokes: gauge links clause -> agent
+        // TC spokes: one gauge link per clause; a twisted link (cos A <= 0) is red
+        ctx.lineWidth = 0.75;
         toc.forEach(r => {
             const n = ax.get(r.ax), ag = agents.get(r.agent);
             if (!n || !ag || ag.px === undefined) return;
             const al = Math.cos(r.A || 0);
-            const col = al > 0.5 ? COL.cyan : al > 0 ? COL.violet : COL.red;
-            ctx.strokeStyle = rgba(col, 0.1 + 0.12 * Math.abs(al));
-            ctx.lineWidth = 0.8;
+            ctx.strokeStyle = al > 0 ? INK(0.03 + 0.03 * al) : rgba(COL.red, 0.14);
             ctx.beginPath(); ctx.moveTo(n.x, n.y); ctx.lineTo(ag.px, ag.py); ctx.stroke();
         });
         // contradiction chords between clauses
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = rgba(COL.red, 0.55);
         chords.forEach(c => {
             const a = ax.get(c.a), b = ax.get(c.b);
             if (!a || !b) return;
-            const pulse = 0.5 + 0.5 * Math.sin(t / 420);
-            ctx.strokeStyle = rgba(COL.red, 0.35 + 0.35 * pulse);
-            ctx.lineWidth = 1.4;
             ctx.beginPath(); ctx.moveTo(a.x, a.y);
             ctx.quadraticCurveTo(cx + (a.x + b.x - 2 * cx) * 0.25, cy + (a.y + b.y - 2 * cy) * 0.25, b.x, b.y);
             ctx.stroke();
         });
-        // AM edges
-        edges.forEach(([s, d, typ, sp]) => {
+        // AM edges: hostile edges dashed red, the rest in neutral ink
+        edges.forEach(([s, d, typ]) => {
             const a = agents.get(s), b = agents.get(d);
             if (!a || !b || a.px === undefined || b.px === undefined) return;
             ctx.save();
-            if (typ === 'op') { ctx.setLineDash([2, 3]); ctx.strokeStyle = rgba(COL.red, 0.4); }
-            else if (typ === 'pr') { ctx.setLineDash([1, 4]); ctx.strokeStyle = rgba(COL.amber, 0.35); }
-            else if (typ === 'st' || typ === 'du') ctx.strokeStyle = rgba(SPECIES_COL[sp] || COL.white, typ === 'du' ? 0.5 : 0.32);
-            else ctx.strokeStyle = 'rgba(255,255,255,0.06)';
-            ctx.lineWidth = typ === 'du' ? 1.3 : 0.8;
+            if (typ === 'op') { ctx.setLineDash([2, 3]); ctx.strokeStyle = rgba(COL.red, 0.28); }
+            else if (typ === 'pr') { ctx.setLineDash([1, 3]); ctx.strokeStyle = INK(0.07); }
+            else if (typ === 'du') ctx.strokeStyle = INK(0.12);
+            else if (typ === 'st') ctx.strokeStyle = INK(0.07);
+            else ctx.strokeStyle = INK(0.03);
+            ctx.lineWidth = 0.75;
             ctx.beginPath(); ctx.moveTo(a.px, a.py); ctx.lineTo(b.px, b.py); ctx.stroke();
             ctx.restore();
         });
-        // AX nodes
+        // AX nodes: filled squares for clauses, hollow for moduli and operations, green when added
         hover = null;
         for (const n of ax.values()) {
-            const k = ease((t - n.born) / 600);
+            const k = ease((t - n.born) / 500);
             const isHover = mouse && Math.hypot(mouse.x - n.x, mouse.y - n.y) < 8;
             if (isHover) hover = { kind: 'ax', n };
-            const col = n.rsi ? COL.green : n.group === 'op' ? COL.amber : n.ref.includes('#mod') ? COL.violet : COL.white;
-            const s = (n.ref.includes('#mod') ? 3 : 2.6) * (isHover ? 1.6 : 1) * (0.5 + 0.5 * k);
-            ctx.save();
-            ctx.translate(n.x, n.y);
-            ctx.rotate(Math.PI / 4);
-            ctx.fillStyle = rgba(col, (n.rsi ? 0.95 : 0.7) * k);
-            ctx.fillRect(-s, -s, s * 2, s * 2);
-            ctx.restore();
+            const s = isHover ? 3.5 : 2.3;
+            const hollow = !n.rsi && (n.group === 'op' || n.ref.includes('#mod'));
+            if (hollow) {
+                ctx.strokeStyle = INK(0.5 * k);
+                ctx.lineWidth = 1;
+                ctx.strokeRect(n.x - s, n.y - s, s * 2, s * 2);
+            } else {
+                ctx.fillStyle = n.rsi ? rgba(COL.green, 0.95 * k) : INK(0.62 * k);
+                ctx.fillRect(n.x - s, n.y - s, s * 2, s * 2);
+            }
             if (W >= 700 && n.group !== 'op' && !n.ref.includes('#mod')) {
                 const id = (n.ref.split('/').pop() || '').slice(0, 6);
                 ctx.font = '9px Menlo, Consolas, monospace';
                 ctx.textAlign = Math.cos(n.angle) > 0.2 ? 'left' : Math.cos(n.angle) < -0.2 ? 'right' : 'center';
                 ctx.textBaseline = 'middle';
-                ctx.fillStyle = rgba(col, 0.55 * k);
+                ctx.fillStyle = n.rsi ? rgba(COL.green, 0.7 * k) : INK(0.35 * k);
                 ctx.fillText(id, n.x + Math.cos(n.angle) * 9, n.y + Math.sin(n.angle) * 9);
             }
         }
-        // agents
+        // agents: solid dots, brighter with rank; red while leaking, green while stocking
         for (const ag of agents.values()) {
             if (ag.tx === undefined) continue;
             ag.px += (ag.tx - ag.px) * 0.08;
             ag.py += (ag.ty - ag.py) * 0.08;
-            const k = ease((t - ag.born) / 600);
-            const col = SPECIES_COL[ag.hero] || COL.white;
-            const size = { Attr: 5.5, Cyc: 4.6, Res: 3.8, Seed: 3.2, Inr: 2.4 }[ag.rank] || 3;
+            const k = ease((t - ag.born) / 500);
+            const size = RANK_SIZE[ag.rank] || 2.5;
             const isHover = mouse && Math.hypot(mouse.x - ag.px, mouse.y - ag.py) < size + 4;
             if (isHover) hover = { kind: 'agent', ag };
-            if (ag.state === 'leak' || ag.state === 'stock') {
-                const hc = ag.state === 'leak' ? COL.red : COL.green;
-                ctx.strokeStyle = rgba(hc, 0.55 + 0.25 * Math.sin(t / 260));
-                ctx.lineWidth = 1.3;
-                ctx.beginPath(); ctx.arc(ag.px, ag.py, size + 4, 0, TAU); ctx.stroke();
+            const col = ag.state === 'leak' ? COL.red : ag.state === 'stock' ? COL.green : null;
+            ctx.fillStyle = col ? rgba(col, 0.95 * k) : INK((RANK_ALPHA[ag.rank] || 0.5) * k);
+            ctx.beginPath(); ctx.arc(ag.px, ag.py, size, 0, TAU); ctx.fill();
+            if (isHover) {
+                ctx.strokeStyle = INK(0.8);
+                ctx.lineWidth = 1;
+                ctx.beginPath(); ctx.arc(ag.px, ag.py, size + 3, 0, TAU); ctx.stroke();
             }
-            const g = ctx.createRadialGradient(ag.px, ag.py, 0, ag.px, ag.py, size * 3.5);
-            g.addColorStop(0, rgba(col, 0.35 * k));
-            g.addColorStop(1, 'transparent');
-            ctx.fillStyle = g;
-            ctx.beginPath(); ctx.arc(ag.px, ag.py, size * 3.5, 0, TAU); ctx.fill();
-            ctx.fillStyle = rgba(mix(col, COL.white, isHover ? 0.5 : 0.15), k);
-            ctx.beginPath(); ctx.arc(ag.px, ag.py, size * (isHover ? 1.4 : 1), 0, TAU); ctx.fill();
         }
         canvas.style.cursor = hover ? 'pointer' : 'default';
         renderTip();
-        // travelling pulses
+        // travelling links: a hairline drawn from source to target, then faded
         pulses = pulses.filter(p => t - p.t < p.dur + 300);
         pulses.forEach(p => {
             const u = ease((t - p.t) / p.dur);
             const x = p.from.x + (p.to.x - p.from.x) * u;
             const y = p.from.y + (p.to.y - p.from.y) * u;
             const fade = 1 - Math.max(0, (t - p.t - p.dur) / 300);
-            ctx.strokeStyle = rgba(p.col, 0.35 * fade);
-            ctx.lineWidth = 1.2;
+            ctx.strokeStyle = rgba(p.col, 0.6 * fade);
+            ctx.lineWidth = 1;
             ctx.beginPath(); ctx.moveTo(p.from.x, p.from.y); ctx.lineTo(x, y); ctx.stroke();
-            const g = ctx.createRadialGradient(x, y, 0, x, y, 9);
-            g.addColorStop(0, rgba(p.col, 0.9 * fade));
-            g.addColorStop(1, 'transparent');
-            ctx.fillStyle = g;
-            ctx.beginPath(); ctx.arc(x, y, 9, 0, TAU); ctx.fill();
+            ctx.fillStyle = rgba(p.col, 0.9 * fade);
+            ctx.beginPath(); ctx.arc(x, y, 1.6, 0, TAU); ctx.fill();
         });
-        flashes = flashes.filter(f => t - f.t < 900);
+        // event marks: one thin ring that opens and fades
+        flashes = flashes.filter(f => t - f.t < 700);
         flashes.forEach(f => {
-            const k = (t - f.t) / 900;
-            ctx.strokeStyle = rgba(f.col, 0.7 * (1 - k));
-            ctx.lineWidth = 1.5;
-            ctx.beginPath(); ctx.arc(f.x, f.y, 6 + 22 * ease(k), 0, TAU); ctx.stroke();
+            const k = (t - f.t) / 700;
+            ctx.strokeStyle = rgba(f.col, 0.6 * (1 - k));
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(f.x, f.y, 5 + 9 * ease(k), 0, TAU); ctx.stroke();
         });
-        ripples = ripples.filter(rp => t - rp.t < 1800);
+        // core: the local driver. The accent arc is the clamped LoRA scale.
+        const cr = 8;
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = INK(0.3);
+        ctx.beginPath(); ctx.arc(cx, cy, cr, 0, TAU); ctx.stroke();
+        if (clampScale > 0) {
+            ctx.strokeStyle = rgba(COL.violet, 0.95);
+            ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.arc(cx, cy, cr, -Math.PI / 2, -Math.PI / 2 + TAU * Math.min(1, clampScale)); ctx.stroke();
+        }
+        ripples = ripples.filter(rp => t - rp.t < 900);
         ripples.forEach(rp => {
-            const k = (t - rp.t) / 1800;
-            ctx.strokeStyle = rgba(rp.col, 0.45 * (1 - k));
-            ctx.lineWidth = 2 * (1 - k) + 0.5;
-            ctx.beginPath(); ctx.arc(cx, cy, 6 + ease(k) * R * 0.95, 0, TAU); ctx.stroke();
+            const k = (t - rp.t) / 900;
+            ctx.strokeStyle = rgba(rp.col, 0.6 * (1 - k));
+            ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.arc(cx, cy, cr + 4 + 12 * ease(k), 0, TAU); ctx.stroke();
         });
-        // core: the driver model; brighter with the clamped LoRA scale
-        const pulse = 0.5 + 0.5 * Math.sin(t / 700);
-        const cr = 14 + 10 * clampScale;
-        const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, cr);
-        cg.addColorStop(0, `rgba(255,255,255,${0.7 + 0.2 * pulse})`);
-        cg.addColorStop(0.4, rgba(COL.violet, 0.45 + 0.3 * clampScale));
-        cg.addColorStop(1, 'transparent');
-        ctx.fillStyle = cg;
-        ctx.beginPath(); ctx.arc(cx, cy, cr, 0, TAU); ctx.fill();
     }
 
     function renderTip() {
@@ -573,6 +536,7 @@ const RsiLattice = (() => {
             const a = hover.ag;
             x = a.px; y = a.py;
             html = `<b>${esc(a.id)} · ${esc(a.state)}</b><code class="rsi-tip__name">${esc(a.name)}</code>`
+                + `<span>${esc(a.hero)} · ${esc(a.rank)}</span>`
                 + `<span>S ${a.S} · L ${a.L} · x ${a.x}</span>`
                 + (a.ax ? `<span>⟼ ${esc(a.ax)}</span>` : '');
         } else {
@@ -594,7 +558,7 @@ const RsiLattice = (() => {
         drawBackground();
         drawDomains(t);
         drawLoop(t);
-        drawComet();
+        drawMarker();
         drawStages(t);
     }
 
@@ -616,10 +580,8 @@ const RsiLattice = (() => {
         onState = opts.onState || null;
         onStage = opts.onStage || null;
         mount.classList.add('rsi-lattice');
-        const legend = Object.entries(SPECIES_COL).map(([s, c]) => `<span title="${s}"><i class="rsi-dot" style="background:rgb(${c.join(',')})"></i>${s}</span>`).join('');
         mount.innerHTML = `
             <canvas class="rsi-lattice__canvas"></canvas>
-            <div class="rsi-lattice__grain"></div>
             <div class="rsi-lattice__hud">
                 <div class="rsi-hud__corner">
                     <span class="rsi-hud__eyebrow">policy</span>
@@ -636,11 +598,10 @@ const RsiLattice = (() => {
                     <span class="rsi-hud__stage-hint" data-k="hint"></span>
                 </div>
                 <div class="rsi-hud__legend">
-                    <span><i class="rsi-ring rsi-ring--leak"></i>leaking</span>
-                    <span><i class="rsi-ring rsi-ring--stock"></i>stocking</span>
+                    <span><i class="rsi-dot rsi-dot--leak"></i>leaking</span>
+                    <span><i class="rsi-dot rsi-dot--stock"></i>stocking</span>
                     <span><i class="rsi-chord"></i>contradiction</span>
-                    <span><i class="rsi-dia rsi-dia--rsi"></i>control added</span>
-                    <div class="rsi-hud__species">${legend}</div>
+                    <span><i class="rsi-sq rsi-sq--rsi"></i>control added</span>
                 </div>
             </div>
             <div class="rsi-lattice__tip"></div>`;
@@ -664,9 +625,9 @@ const RsiLattice = (() => {
 
     function reset() {
         queue = []; active = null; ax = new Map(); agents = new Map(); edges = []; toc = []; chords = [];
-        pulses = []; ripples = []; echoes = []; flashes = []; seen = new Set();
-        version = null; iteration = 0; posture = null; clampScale = 0; trail = [];
-        Object.values(stages).forEach(s => { s.done = 0; s.glow = 0; });
+        pulses = []; ripples = []; flashes = []; seen = new Set();
+        version = null; iteration = 0; posture = null; clampScale = 0;
+        Object.values(stages).forEach(s => { s.done = 0; });
         comet = { mode: 'tail', s: 0, ts: 0 };
         running = true;
         layout();

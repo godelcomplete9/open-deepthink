@@ -130,11 +130,14 @@ async def run_rsi(
     session_store: dict | None = None,
     on_event=None,
     mapper_llm=None,
+    editor_llm=None,
 ) -> dict[str, Any]:
     """
     Run the RSI loop for cybersecurity over an institution's security policy.
 
     ``llm`` is the local driver (llama.cpp, in-process, or ``None`` offline);
+    ``editor_llm`` optionally writes weight programs for the LoRA adapter
+    (``params["lora"]["program"] = {"enabled": True, ...}``).
     ``mapper_llm`` optionally builds the table of correspondences. Leak-driven
     runs (``params={"drive": "leak"}``) produce inspection findings;
     stock-driven runs (``"stock"``) evolve the policy with posture-gated
@@ -153,6 +156,7 @@ async def run_rsi(
         session_store=session_store,
         on_event=on_event,
         mapper_llm=mapper_llm,
+        editor_llm=editor_llm,
     )
 
 

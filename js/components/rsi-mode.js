@@ -189,7 +189,14 @@ const RsiMode = (() => {
         if (lbox && st.lora) {
             const L = st.lora;
             lbox.innerHTML = `<div class="rsi-capacity__meta">examples ${L.examples || 0} · scale ${Number(L.scale || 0).toFixed(2)} (last good ${Number(L.good_scale || 0).toFixed(2)}) · trained ${L.trained || 0}×</div>
-                ${(L.history || []).map(h => `<div class="rsi-lora-row"><code>t=${h.t}</code> <b>${esc(h.decision)}</b> scale → ${Number(h.clamp?.scale ?? 0).toFixed(2)} · pushed ${h.clamp?.pushed ? 'yes' : 'no'}${h.clamp?.reason ? ` (${esc(h.clamp.reason)})` : ''} · rounds/solve ${h.metric?.rounds_per_solve} · leak ${h.metric?.leak} · posture ${h.metric?.capacity}</div>`).join('')}`;
+                ${(L.history || []).map(h => `<div class="rsi-lora-row"><code>t=${h.t}</code> <b>${esc(h.decision)}</b> scale → ${Number(h.clamp?.scale ?? 0).toFixed(2)} · pushed ${h.clamp?.pushed ? 'yes' : 'no'}${h.clamp?.reason ? ` (${esc(h.clamp.reason)})` : ''} · rounds/solve ${h.metric?.rounds_per_solve} · leak ${h.metric?.leak} · posture ${h.metric?.capacity}</div>`).join('')}
+                ${(L.programs || []).length ? `<div class="rsi-capacity__meta" style="margin-top:0.6rem">weight programs</div>` : ''}
+                ${(L.programs || []).map(p => {
+                    const t = p.train || {};
+                    const mix = (p.mix || []).map(m => `${Number(m.id)}×${Number(m.scale).toFixed(2)}`).join(' + ') || 'unchanged';
+                    const fixes = (p.corrections || []).length ? ` · ${p.corrections.length} correction(s): ${esc(p.corrections.slice(0, 3).join('; '))}` : '';
+                    return `<div class="rsi-lora-row"><code>#${Number(p.n)}</code> <b>${esc(p.source)}</b> · examples ${Number(p.examples_in)} → ${Number(p.examples_out)} · r ${Number(t.rank)} α ${Number(t.alpha)} lr ${esc(String(t.learning_rate ?? '—'))} · ${esc((t.target_modules || []).join(','))} · mix ${esc(mix)}${fixes}${p.rationale ? `<br><span class="app-hint">${esc(p.rationale)}</span>` : ''}</div>`;
+                }).join('')}`;
         }
     }
 
@@ -283,6 +290,13 @@ const RsiMode = (() => {
                 clamp_max: num('rsi-lora-max', 1.0),
             },
         };
+        if ($('rsi-wsp-on') && $('rsi-wsp-on').checked) {
+            payload.lora.program = {
+                enabled: true,
+                model: val('rsi-editor-model'),
+                adapter_ids: val('rsi-wsp-adapters').split(',').map(s => parseInt(s, 10)).filter(Number.isFinite),
+            };
+        }
         loopLog = [];
         $('rsi-looplog').innerHTML = '';
         $('rsi-results').classList.add('hidden');
@@ -358,6 +372,7 @@ const RsiMode = (() => {
         buildRail();
         $('rsi-form').addEventListener('submit', start);
         $('rsi-download-btn').addEventListener('click', download);
+        $('rsi-wsp-on')?.addEventListener('change', ev => $('rsi-wsp-fields')?.classList.toggle('hidden', !ev.target.checked));
         document.querySelectorAll('[data-rsi-pane]').forEach(b => b.addEventListener('click', () => showPane(b.dataset.rsiPane)));
         document.querySelectorAll('[data-rsi-drive]').forEach(b => b.addEventListener('click', () => setDrive(b.dataset.rsiDrive)));
         SLIDERS.forEach(k => {

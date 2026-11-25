@@ -353,6 +353,8 @@ A LoRA adapter trained on the loop's own traces is read in the book's language. 
 - It is raised only when the loop measurably improves, meaning fewer rounds per solve, lower `L_G`, or higher artifact capacity.
 - It is restored to its previous value otherwise: the same keep/rollback gate as the lattice.
 
+**Weight-space programming [C].** An editing model may decide how the side mass is formed instead of a fixed clamp step. Its program edits the trace dataset (which routes are folded in), sets the adapter's training spec, and writes a mix of loaded adapters: `clamp(lora=<l1>,scale=<s1>; lora=<l2>,scale=<s2>)`. In the book's terms, the mix decides how much of each stock of side mass the driver carries. The program is a proposal, not a licence: the engine clamps it to the legal ranges and logs every correction. The same keep/rollback gate decides whether it stays.
+
 ---
 
 ## 10. Space, time and coverage (for a defended institution)

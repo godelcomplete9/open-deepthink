@@ -38,7 +38,7 @@ from typing import Any
 
 from langgraph.graph import END, StateGraph
 
-from . import agents, security
+from . import agents, security, wsp
 from . import correspondence as tc
 from . import lora as lora_mod
 from .mechanics import agent_name
@@ -551,7 +551,10 @@ def stock_node(state: NomosState) -> dict[str, Any]:
 def lora_node(state: NomosState) -> dict[str, Any]:
     cfg = _cfg(state)
     world = _world(state)
-    lcfg = lora_mod.LoraConfig(**(state.get("lora_cfg") or {}))
+    lora_in = dict(state.get("lora_cfg") or {})
+    prog_in = lora_in.pop("program", None) or {}
+    lcfg = lora_mod.LoraConfig(**lora_in)
+    pcfg = wsp.ProgramConfig(**prog_in) if isinstance(prog_in, dict) else wsp.ProgramConfig()
     lstate = state.get("lora_state")
     if not isinstance(lstate, lora_mod.LoraState):
         lstate = lora_mod.LoraState()
@@ -568,16 +571,41 @@ def lora_node(state: NomosState) -> dict[str, Any]:
         lcfg.out_dir = os.path.join(base, f"lora_{state.get('run_id', 'run')}")
     if cfg.get("lora_dataset", True):
         lora_mod.append_examples(lstate, lcfg.out_dir, list(state.get("lora_buffer", []) or []))
-    rec = lora_mod.step(lcfg, lstate, metric, state.get("run_id", "run"), world.t)
+    rl = list(state.get("routing_log", []) or [])
+    program_fn = None
+    if pcfg.enabled:
+        history = [h.get("metric", {}) for h in lstate.history] + [metric]
+
+        def call(prompt: str, **kw: Any) -> dict[str, Any]:
+            r = call_llm(prompt, **kw)
+            rl.append(
+                {
+                    "agent": "weight_programmer",
+                    "task": "weight_program",
+                    "tier": r["tier"],
+                    "model": r["model"],
+                    "offline": r["offline"],
+                }
+            )
+            return r
+
+        def program_fn() -> dict[str, Any]:
+            return wsp.program(lcfg, pcfg, lstate, history, call)
+
+    rec = lora_mod.step(
+        lcfg, lstate, metric, state.get("run_id", "run"), world.t, program_fn=program_fn
+    )
+    mix_txt = ",".join(f"{m['id']}:{m['scale']:.2f}" for m in lstate.mix)
     world.event(
         "clamp",
         "LoRA",
-        f"clamp(lora=adapter{lcfg.adapter_id},scale={lstate.scale:.2f}) {rec['decision']}",
+        f"clamp(lora=adapter{lcfg.adapter_id},scale={lstate.scale:.2f}{',mix=' + mix_txt if mix_txt else ''}) {rec['decision']}",
         decision=rec["decision"],
         scale=lstate.scale,
     )
     return {
         "world": world,
+        "routing_log": rl,
         "lora_state": lstate,
         "lora_cfg": {**(state.get("lora_cfg") or {}), "out_dir": lcfg.out_dir},
         "lora_buffer": [],

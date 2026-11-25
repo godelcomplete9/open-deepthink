@@ -1722,6 +1722,23 @@ _RSI_SENSITIVITY = {
 }
 
 
+def _build_rsi_editor(payload: dict, program: dict | None):
+    """Editing model for LoRA weight-space programming, through OpenRouter (or None).
+
+    Opt-in only: the editor sees trace text that quotes the policy. Without an
+    API key or a model id the loop uses the deterministic offline program.
+    """
+    from deepthink.nomosloop.routing import RouterChat
+
+    if payload.get("offline") or not program:
+        return None
+    key = str(payload.get("api_key") or "")
+    model = str(program.get("model") or get_settings().rsi_editor_model or "").strip()
+    if not key or not model:
+        return None
+    return RouterChat(model[:200], key)
+
+
 def _build_rsi_models(payload: dict):
     """(driver, mapper) for the RSI loop. The driver is always the local llama.cpp server."""
     from deepthink.nomosloop.routing import is_local_url
@@ -1803,6 +1820,19 @@ async def start_rsi(payload: dict = Body(...)):
             # the trainer command comes from server settings only, never from the request
             "train_cmd": get_settings().rsi_lora_train_cmd,
         }
+        prog_in = lora_in.get("program") or {}
+        if not isinstance(prog_in, dict):
+            raise TypeError("lora.program must be an object")
+        if prog_in.get("enabled"):
+            ids = prog_in.get("adapter_ids") or []
+            if not isinstance(ids, list):
+                raise TypeError("adapter_ids must be a list")
+            lora["program"] = {
+                "enabled": True,
+                "adapter_ids": sorted({max(0, min(64, int(i))) for i in ids})[:8],
+                "allow_negative": bool(prog_in.get("allow_negative", False)),
+                "model": str(prog_in.get("model") or "")[:200],
+            }
     except (TypeError, ValueError):
         return JSONResponse(status_code=400, content={"message": "Invalid parameter."})
     drive = str(payload.get("drive") or "bal")
@@ -1816,6 +1846,7 @@ async def start_rsi(payload: dict = Body(...)):
 
     try:
         driver, mapper = _build_rsi_models(payload)
+        editor = _build_rsi_editor(payload, lora.get("program"))
     except Exception as e:  # noqa: BLE001
         return JSONResponse(status_code=400, content={"message": str(e)})
 
@@ -1854,6 +1885,7 @@ async def start_rsi(payload: dict = Body(...)):
                 log=_log,
                 on_event=_on_event,
                 mapper_llm=mapper,
+                editor_llm=editor,
             )
             _emit({"type": "rsi_complete", "result": result})
         except Exception as e:  # noqa: BLE001
@@ -1872,6 +1904,9 @@ async def start_rsi(payload: dict = Body(...)):
         "mapper": "openrouter"
         if mapper is not None
         else ("offline" if offline else "driver-fallback"),
+        "editor": editor.model
+        if editor is not None
+        else ("offline-program" if lora.get("program") else "off"),
     }
 
 

@@ -365,6 +365,216 @@ def t10():
 chk("live on_event stream brackets every node with snapshots", t10)
 
 
+def t11():
+    from deepthink.nomosloop import wsp
+    from deepthink.nomosloop.lora import example
+
+    exs = [
+        example("heal", "p1", "long answer one"),
+        example("heal", "p1", "short"),
+        example("stock", "p2", "a2"),
+    ]
+    clean, notes = wsp.validate(
+        {
+            "data": {
+                "drop": [0, 99],
+                "rewrite": [{"i": 2, "answer": "a2 shorter"}],
+                "add": [{"prompt": "p3", "answer": "a3"}],
+            },
+            "train": {
+                "rank": 999,
+                "alpha": 10**6,
+                "learning_rate": 5,
+                "target_modules": ["q_proj", "bogus"],
+            },
+            "mix": [{"id": 0, "scale": 7}, {"id": 9, "scale": 0.5}, {"id": 1, "scale": -0.4}],
+        },
+        n_examples=3,
+        adapter_ids=[1],
+        main_id=0,
+        clamp_max=1.0,
+        allow_negative=False,
+    )
+    t = clean["train"]
+    assert t["rank"] == 64 and t["alpha"] == 256 and t["learning_rate"] == 1e-3, t
+    assert t["target_modules"] == ["q_proj"], t
+    assert clean["mix"] == [{"id": 0, "scale": 1.0}, {"id": 1, "scale": 0.0}], clean["mix"]
+    assert clean["data"]["drop"] == [0]
+    assert any("not a loaded adapter" in n for n in notes) and any("rank 999" in n for n in notes)
+    out = wsp.apply_data(exs, clean["data"])
+    assert (
+        len(out) == 3
+        and out[-1]["kind"] == "programmed"
+        and out[1]["messages"][-1]["content"] == "a2 shorter"
+    )
+    assert len(exs) == 3 and exs[2]["messages"][-1]["content"] == "a2"  # input untouched
+    off = wsp.offline_program(exs, 0, 0.25, 0.25, 1.0)
+    assert off["data"]["drop"] == [0] and off["mix"] == [{"id": 0, "scale": 0.5}], off
+    neg, _ = wsp.validate({"mix": [{"id": 1, "scale": -0.4}]}, 0, [1], 0, 1.0, True)
+    assert neg["mix"] == [{"id": 1, "scale": -0.4}]
+    # half the dataset at most can be dropped
+    capped, notes = wsp.validate({"data": {"drop": [0, 1, 2]}}, 3, [], 0, 1.0, False)
+    assert capped["data"]["drop"] == [0] and notes
+
+
+chk("weight program: clamped spec, loaded adapters only, data edits", t11)
+
+
+def t12():
+    from deepthink.nomosloop import lora
+
+    sent = []
+
+    def fake_http(url, method="GET", body=None, timeout=5.0):
+        sent.append((url, method, body))
+        return True, {"ok": True}
+
+    def prog(mix):
+        return {
+            "n": 1,
+            "source": "bridge-editor",
+            "examples_in": 4,
+            "examples_out": 3,
+            "corrections": [],
+            "spec_path": "spec.json",
+            "dataset_path": "data.jsonl",
+            "program": {"mix": mix},
+        }
+
+    first = [{"id": 0, "scale": 0.4}, {"id": 1, "scale": 1.0}]
+    second = [{"id": 0, "scale": 0.6}, {"id": 1, "scale": 0.5}]
+    orig = lora._http
+    lora._http = fake_http
+    try:
+        cfg = lora.LoraConfig(enabled=True, base_url="http://localhost:8080/v1", adapter_id=0)
+        st = lora.LoraState()
+        r1 = lora.step(
+            cfg,
+            st,
+            {"rounds_per_solve": 3.0, "leak": 0.3, "capacity": 0.2, "solves": 2},
+            "run",
+            1,
+            program_fn=lambda: prog(first),
+        )
+        assert r1["decision"] == "program" and st.mix == first and st.scale == 0.4, r1
+        assert sent[-1] == ("http://localhost:8080/lora-adapters", "POST", first)
+        assert r1["train"]["ran"] is False  # no trainer configured
+        r2 = lora.step(
+            cfg,
+            st,
+            {"rounds_per_solve": 2.0, "leak": 0.2, "capacity": 0.3, "solves": 4},
+            "run",
+            2,
+            program_fn=lambda: prog(second),
+        )
+        assert r2["decision"] == "program" and st.good_mix == first and st.mix == second
+        r3 = lora.step(
+            cfg,
+            st,
+            {"rounds_per_solve": 4.0, "leak": 0.4, "capacity": 0.3, "solves": 5},
+            "run",
+            3,
+            program_fn=lambda: prog([{"id": 1, "scale": 0.1}]),
+        )
+        assert r3["decision"] == "rollback" and st.mix == first, r3
+        assert sent[-1][2] == first
+    finally:
+        lora._http = orig
+
+
+chk("weight program: mix clamp, keep on improvement, roll back to last good mix", t12)
+
+
+def t13():
+    import os
+
+    import openai
+    from deepthink.nomosloop import routing, run_rsi_pipeline
+    from deepthink.nomosloop.routing import RouterChat
+
+    driver_calls = []
+    routing.clear_llm_bridge()
+    routing.set_llm_bridge(lambda p, k, s, m, t: driver_calls.append(k) or "driver text")
+    old = os.environ.pop("RSI_EDITOR_MODEL", None)
+    try:
+        r = routing.call_llm("x", task_kind="weight_program")
+        assert r["tier"] == "editor" and r["offline"] and r["model"] == "offline-editor", r
+        assert not driver_calls, "the editor must never fall back to the driver"
+    finally:
+        routing.clear_llm_bridge()
+        if old is not None:
+            os.environ["RSI_EDITOR_MODEL"] = old
+
+    seen = {}
+
+    class FakeClient:
+        def __init__(self, **kw):
+            seen["client"] = kw
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create))
+
+        def create(self, **kw):
+            seen["create"] = kw
+            msg = SimpleNamespace(content="{}")
+            return SimpleNamespace(choices=[SimpleNamespace(message=msg)])
+
+    orig = openai.OpenAI
+    openai.OpenAI = FakeClient
+    try:
+        out = RouterChat("vendor/editing-model", "test-key").invoke([("user", "hi")])
+    finally:
+        openai.OpenAI = orig
+    assert out.content == "{}" and seen["create"]["model"] == "vendor/editing-model"
+    assert "temperature" not in seen["create"] and "top_p" not in seen["create"]
+
+    class FakeLocal:
+        def invoke(self, messages):
+            return SimpleNamespace(content="Rotate the credentials and log every access.")
+
+    class FakeEditor:
+        model_name = "fake-editor"
+
+        def invoke(self, messages):
+            assert "Return a JSON object" in messages[-1][1]
+            body = {
+                "train": {"rank": 999},
+                "mix": [{"id": 0, "scale": 0.5}, {"id": 1, "scale": 7}],
+                "rationale": "t",
+            }
+            return SimpleNamespace(content="```json\n" + json.dumps(body) + "\n```")
+
+    with tempfile.TemporaryDirectory() as workdir:
+        res = asyncio.run(
+            run_rsi_pipeline(
+                FakeLocal(),
+                RUNBOOK.read_text(encoding="utf-8"),
+                law_title="t",
+                params={
+                    "drive": "stock",
+                    "iterations": 2,
+                    "lora": {"out_dir": workdir, "program": {"enabled": True, "adapter_ids": [1]}},
+                },
+                artifact_path=str(Path(workdir) / "report.md"),
+                editor_llm=FakeEditor(),
+            )
+        )
+        assert not res.get("error"), res.get("error")
+        progs = res["lora"]["programs"]
+        assert progs and all(p["source"] == "bridge-editor" for p in progs), progs
+        assert progs[0]["mix"] == [{"id": 0, "scale": 0.5}, {"id": 1, "scale": 1.0}], progs[0][
+            "mix"
+        ]
+        assert any("rank 999" in c for p in progs for c in p["corrections"])
+        assert Path(progs[0]["dataset_path"]).is_file() and Path(progs[0]["spec_path"]).is_file()
+    assert any(
+        r["agent"] == "weight_programmer" and r["model"] == "bridge-editor"
+        for r in res["routing_log"]
+    )
+    assert res["editor"] == {"model": "fake-editor", "programming": True}, res["editor"]
+
+
+chk("weight program: editor tier routing, no sampling params, pipeline wiring", t13)
+
+
 ok = sum(1 for _, s, _ in results if s == "OK")
 total = len(results)
 for name, status, err in results:

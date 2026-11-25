@@ -59,21 +59,11 @@
   height: clamp(420px, 62vw, 600px);
   border-radius: calc(var(--app-radius-lg) - 0.5rem);
   overflow: hidden;
-  background: #040405;
+  background: #08080a;
   border: 1px solid var(--app-glass-border);
-  box-shadow: inset 0 0 60px rgba(0, 0, 0, 0.7);
 }
 
 .rsi-lattice__canvas { position: absolute; inset: 0; display: block; }
-
-.rsi-lattice__grain {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.12) 50%);
-  background-size: 100% 4px;
-  opacity: 0.6;
-}
 
 .rsi-lattice__hud { position: absolute; inset: 0; pointer-events: none; }
 
@@ -101,25 +91,18 @@
   font-weight: 600;
   line-height: 1.15;
   color: var(--app-text);
-  text-shadow: 0 0 18px rgba(139, 92, 246, 0.6);
 }
 
 .rsi-hud__stage {
   position: absolute;
-  left: 50%;
+  left: 1.1rem;
   bottom: 1rem;
-  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.15rem;
-  padding: 0.55rem 1.1rem;
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 0.85rem;
-  max-width: calc(100% - 2rem);
-  text-align: center;
+  max-width: 34%;
+  text-align: left;
 }
 
 .rsi-hud__stage-name {
@@ -130,7 +113,6 @@
   color: rgba(255, 255, 255, 0.75);
 }
 
-.is-running .rsi-hud__stage-name { animation: vortex-label-pulse 1.6s ease-in-out infinite; }
 
 .rsi-hud__stage-hint { font-size: 0.72rem; color: var(--app-text-dim); }
 
@@ -149,17 +131,14 @@
 .rsi-hud__legend span { display: flex; align-items: center; gap: 0.45rem; justify-content: flex-end; }
 
 .rsi-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; }
-.rsi-ring { display: inline-block; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid; }
-.rsi-ring--leak { border-color: var(--app-accent-danger); }
-.rsi-ring--stock { border-color: var(--app-accent-success); }
-.rsi-chord { display: inline-block; width: 12px; height: 0; border-top: 1.5px solid var(--app-accent-danger); }
-.rsi-dia { display: inline-block; width: 6px; height: 6px; transform: rotate(45deg); }
-.rsi-dia--rsi { background: var(--app-accent-success); }
+.rsi-dot--leak { background: var(--app-accent-danger); }
+.rsi-dot--stock { background: var(--app-accent-success); }
+.rsi-chord { display: inline-block; width: 12px; height: 0; border-top: 1px solid var(--app-accent-danger); }
+.rsi-sq { display: inline-block; width: 5px; height: 5px; }
+.rsi-sq--rsi { background: var(--app-accent-success); }
 
 .rsi-hud__corner--right { left: auto; right: 1.1rem; top: 1rem; align-items: flex-end; text-align: right; }
 .rsi-hud__legend { top: auto; bottom: 1rem; right: 1.1rem; }
-.rsi-hud__species { display: grid; grid-template-columns: repeat(4, auto); gap: 0.15rem 0.5rem; margin-top: 0.3rem; justify-content: end; }
-.rsi-hud__species span { gap: 0.25rem; }
 
 .rsi-lattice__tip {
   position: absolute;
@@ -172,9 +151,8 @@
   padding: 0.5rem 0.7rem;
   font-size: 0.72rem;
   color: var(--app-text-secondary);
-  background: rgba(8, 8, 12, 0.85);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(139, 92, 246, 0.3);
+  background: #0e0e11;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 0.6rem;
   opacity: 0;
   transform: translateY(4px);
@@ -227,12 +205,11 @@
 
 .rsi-rail__step.is-active {
   color: var(--app-text);
-  background: rgba(139, 92, 246, 0.15);
+  background: rgba(139, 92, 246, 0.1);
   border-color: rgba(139, 92, 246, 0.35);
-  box-shadow: 0 0 20px rgba(139, 92, 246, 0.15);
 }
 
-.rsi-rail__step.is-active::before { background: #fff; border-color: #fff; box-shadow: 0 0 8px #fff; }
+.rsi-rail__step.is-active::before { background: var(--app-accent); border-color: var(--app-accent); }
 
 .rsi-rail__sep { color: rgba(255, 255, 255, 0.15); font-size: 0.7rem; }
 .rsi-rail__loopback { color: var(--app-accent); font-size: 0.85rem; padding: 0 0.25rem; }
@@ -325,7 +302,7 @@
   .rsi-hud__legend { display: none; }
   .rsi-hud__corner--right .rsi-hud__version { font-size: 1.25rem; }
   .rsi-hud__version { font-size: 1.25rem; }
-  .rsi-hud__stage { bottom: 0.6rem; padding: 0.4rem 0.8rem; }
+  .rsi-hud__stage { bottom: 0.6rem; left: 0.8rem; max-width: 60%; }
   .rsi-hud__stage-hint { display: none; }
 }
 
@@ -382,6 +359,5 @@
 .rsi-looplog__sep { color: var(--app-text-dim); margin: 0.5rem 0 0.25rem; }
 
 @media (max-width: 820px) {
-  .rsi-hud__species { display: none; }
   .rsi-hud__legend { font-size: 0.6rem; }
 }

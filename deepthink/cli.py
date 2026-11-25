@@ -223,12 +223,15 @@ def cmd_rsi(args: argparse.Namespace) -> int:
         params["mutators"] = args.mutators
     if args.mapper_arc_agi2 is not None:
         params["mapper_arc_agi2"] = args.mapper_arc_agi2
-    if args.lora:
+    if args.lora or args.lora_program:
         params["lora"] = {
-            "enabled": True,
+            "enabled": bool(args.lora),
             "adapter_id": args.lora_adapter_id,
             "clamp_max": args.lora_clamp_max,
         }
+        if args.lora_program:
+            ids = [int(x) for x in (args.lora_adapters or "").split(",") if x.strip().isdigit()]
+            params["lora"]["program"] = {"enabled": True, "adapter_ids": ids}
 
     try:
         with open(args.input, encoding="utf-8", errors="replace") as f:
@@ -240,9 +243,10 @@ def cmd_rsi(args: argparse.Namespace) -> int:
         print(f"--input {args.input!r} is empty; nothing to analyse.", file=sys.stderr)
         return 2
 
+    mutators = params.get("mutators")
     est = estimate_rsi_cost(
         iterations=int(params.get("iterations") or 1),
-        mutators=int(params.get("mutators") if params.get("mutators") is not None else 8),
+        mutators=8 if mutators is None else int(mutators),
         drive=args.drive,
     )
     print(est.summary_line(), file=sys.stderr)
@@ -256,6 +260,7 @@ def cmd_rsi(args: argparse.Namespace) -> int:
 
     llm = None
     mapper = None
+    editor = None
     if not offline:
         from deepthink.models import ChatLlamaCpp
 
@@ -281,6 +286,11 @@ def cmd_rsi(args: argparse.Namespace) -> int:
                 openai_api_base="https://openrouter.ai/api/v1",
                 temperature=0.2,
             )
+        editor_model = args.editor_model or cfg.rsi_editor_model
+        if args.lora_program and key and editor_model:
+            from deepthink.nomosloop.routing import RouterChat
+
+            editor = RouterChat(editor_model, key)
 
     artifact = args.artifact or os.path.join("artifacts", f"rsi_{args.title}.md")
 
@@ -293,6 +303,7 @@ def cmd_rsi(args: argparse.Namespace) -> int:
             artifact_path=artifact,
             log=_print_log if args.verbose else None,
             mapper_llm=mapper,
+            editor_llm=editor,
         )
 
     try:
@@ -441,6 +452,19 @@ def build_parser() -> argparse.ArgumentParser:
         "--lora-adapter-id", type=int, default=0, help="Adapter id loaded on the llama.cpp server"
     )
     p_rsi.add_argument("--lora-clamp-max", type=float, default=1.0, help="Maximum adapter scale")
+    p_rsi.add_argument(
+        "--lora-program",
+        action="store_true",
+        help="Weight-space programming: an editing model programs the LoRA (data, spec, adapter mix)",
+    )
+    p_rsi.add_argument(
+        "--editor-model",
+        default=None,
+        help="Router id of the editing model, e.g. Claude Fable 5.2 or GPT-6.2 Astra (or RSI_EDITOR_MODEL)",
+    )
+    p_rsi.add_argument(
+        "--lora-adapters", default="", help="Adapter ids loaded on llama.cpp for the mix, e.g. 0,1"
+    )
     p_rsi.add_argument("--json-out", default=None, help="Write the full result JSON here")
     p_rsi.add_argument("--yes", action="store_true", help="Allow large runs")
     p_rsi.add_argument("-v", "--verbose", action="store_true", help="Print pipeline logs to stderr")

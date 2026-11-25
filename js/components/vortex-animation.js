@@ -5,9 +5,14 @@
 const VortexAnimation = (() => {
     'use strict';
 
-    const PARTICLE_COUNT = 420;
-    const NOISE_DOTS = 280;
+    const PARTICLE_COUNT = 260;
+    const NOISE_DOTS = 90;
     const FADE_MS = 600;
+    // A compact wheel: its radius follows the panel but never exceeds MAX_R,
+    // and the label sits just below it.
+    const MAX_R = 54;
+    const R_FRACTION = 0.3;
+    const LABEL_GAP = 16;
 
     let rootEl = null;
     let canvasEl = null;
@@ -85,13 +90,19 @@ const VortexAnimation = (() => {
         for (let i = 0; i < PARTICLE_COUNT; i++) {
             const isRed = Math.random() > 0.5;
             particles.push({
-                radius: Math.random() * 260 + 18,
+                // ~half the particles sit on the rim, the rest fill the disc
+                frac: Math.min(1, 0.07 + Math.random() * 1.9),
                 angle: Math.random() * Math.PI * 2,
                 baseSpeed: Math.random() * 0.006 + 0.002,
-                size: Math.random() * 1.4 + 0.5,
+                size: Math.random() * 0.9 + 0.45,
                 color: isRed ? [220, 38, 38] : [59, 130, 246],
             });
         }
+    }
+
+    function geometry(width, height) {
+        const maxR = Math.min(MAX_R, Math.min(width, height) * R_FRACTION);
+        return { maxR, cx: width / 2, cy: height / 2 - LABEL_GAP };
     }
 
     function resizeCanvas(ctx) {
@@ -104,6 +115,8 @@ const VortexAnimation = (() => {
         canvasEl.style.width = w + 'px';
         canvasEl.style.height = h + 'px';
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        const g = geometry(w, h);
+        rootEl.style.setProperty('--vortex-label-top', `${Math.round(g.cy + g.maxR + LABEL_GAP)}px`);
     }
 
     function renderFrame(ctx, gen) {
@@ -122,8 +135,7 @@ const VortexAnimation = (() => {
         ctx.fillStyle = `rgb(${Math.round(4 * flicker)}, ${Math.round(4 * flicker)}, ${Math.round(4 * flicker)})`;
         ctx.fillRect(0, 0, width, height);
 
-        const centerX = width / 2;
-        const centerY = height / 2;
+        const { maxR, cx: centerX, cy: centerY } = geometry(width, height);
 
         // Sparse film grain
         ctx.fillStyle = `rgba(255, 255, 255, ${0.08 + 0.12 * pulse})`;
@@ -131,13 +143,12 @@ const VortexAnimation = (() => {
             ctx.fillRect(Math.random() * width, Math.random() * height, Math.random() * 1.4, Math.random() * 1.4);
         }
 
-        const maxR = Math.min(width, height) * 0.52;
-        const radiusScale = 0.72 + 0.18 * pulse;
+        const radiusScale = 0.82 + 0.18 * pulse;
 
         for (let i = 0; i < particles.length; i++) {
             const p = particles[i];
             p.angle += p.baseSpeed * speedMultiplier;
-            const r0 = Math.min(p.radius, maxR) * radiusScale;
+            const r0 = p.frac * maxR * radiusScale;
             const x = centerX + Math.cos(p.angle) * r0;
             const y = centerY + Math.sin(p.angle) * r0;
 
@@ -149,11 +160,11 @@ const VortexAnimation = (() => {
 
             ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${alpha})`;
             ctx.beginPath();
-            ctx.arc(x, y, p.size * (1 + 0.6 * pulse), 0, Math.PI * 2);
+            ctx.arc(x, y, p.size * (1 + 0.4 * pulse), 0, Math.PI * 2);
             ctx.fill();
         }
 
-        const bloomR = Math.min(width, height) * (0.18 + 0.22 * pulse);
+        const bloomR = maxR * (0.4 + 0.4 * pulse);
         const gradient = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, bloomR);
         gradient.addColorStop(0, `rgba(255, 255, 255, ${0.18 + 0.28 * pulse})`);
         gradient.addColorStop(0.55, `rgba(255, 255, 255, ${0.06 * pulse})`);

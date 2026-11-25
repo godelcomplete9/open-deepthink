@@ -12,6 +12,10 @@ Model roles:
 * ``llm``, the **driver**, must be local: in-process, or a llama.cpp /
   private-network endpoint. It drives the lattice, the heals and the control
   drafting. ``require_local_driver`` (default True) refuses a remote driver.
+* ``editor_llm``, optional, is the editing model for weight-space programming
+  of the LoRA adapter (``params["lora"]["program"]``). A powerful model such
+  as Claude Fable 5.2 or GPT-6.2 Astra is the intended use. It sees trace
+  text, which quotes the policy.
 * ``mapper_llm``, optional, builds the table of correspondences. A model
   above 70 on ARC-AGI-2 is recommended. Declare its score with
   ``params["mapper_arc_agi2"]`` (it is recorded, not verified).
@@ -55,7 +59,7 @@ def default_rsi_params() -> dict[str, Any]:
         "stock_budget": None,
         "objective": "",  # security objective that guides findings and controls
         "cot": True,  # ask the driver for findings/controls text
-        "lora": {},  # LoraConfig fields: enabled, base_url, adapter_id, clamp_max, ...
+        "lora": {},  # LoraConfig fields + "program": {enabled, adapter_ids, allow_negative, sample}
         "mapper_arc_agi2": None,  # declared ARC-AGI-2 score of the mapper
         "require_local_driver": True,
     }
@@ -162,6 +166,7 @@ async def run_rsi_pipeline(
     session_id: str = "",
     on_event: EventFn = None,
     mapper_llm=None,
+    editor_llm=None,
 ) -> dict[str, Any]:
     """Run the RSI security loop over a policy text.
 
@@ -232,10 +237,29 @@ async def run_rsi_pipeline(
         mapper_desc = "openrouter"
     else:
         mapper_desc = "driver-fallback"
+    prog = dict(lora_cfg["program"]) if isinstance(lora_cfg.get("program"), dict) else {}
+    if prog:
+        lora_cfg["program"] = prog  # a copy: never mutate the caller's params
+    if not prog.get("enabled"):
+        editor_desc = "off"
+    elif offline:
+        editor_desc = "offline-program"
+    elif editor_llm is not None:
+        editor_desc = (
+            getattr(editor_llm, "model_name", None)
+            or getattr(editor_llm, "model", None)
+            or "in-process"
+        )
+    elif os.environ.get("RSI_EDITOR_MODEL") and os.environ.get("OPENROUTER_API_KEY"):
+        editor_desc = os.environ["RSI_EDITOR_MODEL"]
+    else:
+        editor_desc = "offline-program (no editing model configured)"
+    if prog.get("enabled") and not prog.get("model"):
+        prog["model"] = str(editor_desc)
 
     await _log(
         f"--- [RSI] security loop: title={p['law_title']!r} chars={len(raw_text)} iterations={p['iterations']} "
-        f"drive={drive} λ_AM={rsi_cfg['lambda_am']} offline={offline} driver={driver_desc} mapper={mapper_desc} ---"
+        f"drive={drive} λ_AM={rsi_cfg['lambda_am']} offline={offline} driver={driver_desc} mapper={mapper_desc} editor={editor_desc} ---"
     )
 
     def _observer(phase: str, node: str, state: dict, update: dict | None) -> None:
@@ -264,6 +288,8 @@ async def run_rsi_pipeline(
             routing.set_llm_bridge(_make_bridge(llm))
         if mapper_llm is not None and not offline:
             routing.set_tier_bridge("mapper", _make_bridge(mapper_llm))
+        if editor_llm is not None and not offline and prog.get("enabled"):
+            routing.set_tier_bridge("editor", _make_bridge(editor_llm))
         try:
             return run_pipeline(
                 raw_text,
@@ -307,6 +333,7 @@ async def run_rsi_pipeline(
             "lambda_am": rsi_cfg["lambda_am"],
             "driver": {"endpoint": driver_desc, "local": True},
             "mapper": {"endpoint": mapper_desc, "arc_agi2_declared": rsi_cfg["mapper_arc_agi2"]},
+            "editor": {"model": str(editor_desc), "programming": bool(prog.get("enabled"))},
             "posture_baseline": float(post[0]["score"]) if post else 0.0,
             "posture_final": float(post[-1]["score"]) if post else 0.0,
             "posture_history": post,

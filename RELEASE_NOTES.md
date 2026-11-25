@@ -11,7 +11,9 @@
 * Policy parser and posture (`security.py`); drives `leak` / `bal` / `stock`, `λ_AM`, and per-parameter sensitivity
 * Model roles: the driver must be local (llama.cpp or in-process; remote drivers are refused); the mapper may be remote, with a recommended ARC-AGI-2 > 70 that is declared, not verified
 * LoRA loop (`lora.py`): chat-format trace dataset, optional server-side trainer (`RSI_LORA_TRAIN_CMD`), keep/rollback clamp through llama.cpp `POST /lora-adapters`
-* Web UI: the RSI Loop tab shows the three domains (policy band, gauge spokes, agent lattice) with findings, controls, correspondences, LoRA history and loop log
+* Optional weight-space programming of the LoRA (`wsp.py`): an editing model (for example Claude Fable 5.2 or GPT-6.2 Astra) writes a validated program that curates the dataset, sets the training spec and mixes loaded adapters. Opt-in via `--lora-program --editor-model`, `RSI_EDITOR_MODEL`, or the LoRA panel; deterministic offline program otherwise; the editor never falls back to the driver
+* Web UI: the RSI Loop tab shows the three domains (policy band, gauge spokes, agent lattice) as a minimal line drawing, with findings, controls, correspondences, LoRA history, weight programs and loop log
+* The Diffusion Vortex in Slot Machine and Brainstorm modes is now a compact wheel with its label underneath, instead of filling the panel
 * Fixed: buttons inside a mode panel that reused the `mode-tab` class could switch the whole app to a blank mode
 * Removed: the mesh/inhabitants engine, mutation swarm, runtime topology rewiring, and the physics examples (replaced by `examples/security/`)
 
@@ -21,7 +23,8 @@
 * README: RSI is the headline section, with the mechanism, drives, models, benchmark and limits
 
 ### Tests
-* `tests/phase_rsi.py` rewritten (10 checks): Part I encounter masses, conservation of the total reserve, the Leak bound, gauge invariance, parser and seeded contradictions, drive behaviour, local-driver rule, LoRA clamp, event stream
+* `tests/phase_rsi.py` rewritten (13 checks): Part I encounter masses, conservation of the total reserve, the Leak bound, gauge invariance, parser and seeded contradictions, drive behaviour, local-driver rule, LoRA clamp, event stream, weight-program validation, mix keep/rollback, editor routing
+* Fixed: mypy failure in `deepthink/cli.py` that stopped CI before the test suite ran
 * `python -m deepthink.nomosloop.benchmark` reports every example under every drive and fails on any posture regression
 
 ---

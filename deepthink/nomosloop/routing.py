@@ -11,6 +11,10 @@ Two tiers, and the split is a rule of the engine, not a preference:
   table of correspondences and the multi-scale synthesis, i.e. the
   abstraction-transfer steps. The score is declared by the operator, not
   verified here.
+- **editor** (optional; a powerful editing model such as Claude Fable 5.2 or
+  GPT-6.2 Astra): writes weight programs for the LoRA adapter (``wsp.py``).
+  It uses its own bridge, or OpenRouter with ``RSI_EDITOR_MODEL``. It never
+  falls back to the driver; without an editor the program is deterministic.
 
 Backends, in priority order:
 
@@ -34,7 +38,7 @@ from collections.abc import Callable
 from typing import Any, Literal
 from urllib.parse import urlparse
 
-Tier = Literal["driver", "mapper"]
+Tier = Literal["driver", "mapper", "editor"]
 
 # task_kind -> tier.
 ROUTING_POLICY: dict[str, Tier] = {
@@ -48,6 +52,7 @@ ROUTING_POLICY: dict[str, Tier] = {
     "code_gen": "driver",
     "inspect": "driver",
     "artifact_design": "driver",
+    "weight_program": "editor",
 }
 
 OPENROUTER_BASE = "https://openrouter.ai/api/v1"
@@ -133,6 +138,44 @@ def is_local_llm(llm: Any) -> bool:
     return not any(getattr(llm, a, None) is not None for a in _NETWORK_ATTRS)
 
 
+class RouterChat:
+    """Minimal OpenAI-compatible chat client for editing models.
+
+    It sends no sampling parameters (newer models reject them) and exposes the
+    ``invoke(messages)`` shape the pipeline bridges expect.
+    """
+
+    def __init__(
+        self,
+        model: str,
+        api_key: str,
+        base_url: str = OPENROUTER_BASE,
+        max_tokens: int = 8000,
+        timeout: float = 900.0,
+    ) -> None:
+        self.model = model
+        self.model_name = model
+        self.base_url = base_url
+        self.max_tokens = max_tokens
+        self.timeout = timeout
+        self._key = api_key
+
+    def invoke(self, messages: list[tuple[str, str]]) -> Any:
+        from types import SimpleNamespace
+
+        from openai import OpenAI
+
+        client = OpenAI(base_url=self.base_url, api_key=self._key, timeout=self.timeout)
+        resp = client.chat.completions.create(
+            model=self.model,
+            messages=[{"role": r, "content": c} for r, c in messages],
+            max_tokens=self.max_tokens,
+            extra_headers={"X-Title": "open-deepthink RSI editor"},
+        )
+        text = (resp.choices[0].message.content or "") if resp.choices else ""
+        return SimpleNamespace(content=text)
+
+
 def load_dotenv(path: str = ".env") -> bool:
     """Minimal .env loader (no extra dependency).
 
@@ -174,6 +217,11 @@ def mapper_model() -> str:
     )
 
 
+def editor_model() -> str:
+    """The editing model's id on the router. No default: an id must be configured."""
+    return os.environ.get("RSI_EDITOR_MODEL", "").strip()
+
+
 def route(task_kind: str) -> Tier:
     """Return the tier for a task_kind. Unknown kinds run on the driver."""
     return ROUTING_POLICY.get(task_kind, "driver")
@@ -208,7 +256,13 @@ def _bridge_call(
     return {"text": str(text), "tier": tier, "model": f"bridge-{tier}", "offline": False}
 
 
-def _openrouter(prompt: str, system: str, max_tokens: int) -> str:
+def _openrouter(
+    prompt: str,
+    system: str,
+    max_tokens: int,
+    model: str | None = None,
+    temperature: float | None = 0.2,
+) -> str:
     from openai import OpenAI
 
     client = OpenAI(base_url=OPENROUTER_BASE, api_key=os.environ["OPENROUTER_API_KEY"])
@@ -216,12 +270,15 @@ def _openrouter(prompt: str, system: str, max_tokens: int) -> str:
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
+    kwargs: dict[str, Any] = {}
+    if temperature is not None:
+        kwargs["temperature"] = temperature
     resp = client.chat.completions.create(
-        model=mapper_model(),
+        model=model or mapper_model(),
         messages=messages,
         max_tokens=max_tokens,
-        temperature=0.2,
-        extra_headers={"X-Title": "open-deepthink RSI mapper"},
+        extra_headers={"X-Title": "open-deepthink RSI"},
+        **kwargs,
     )
     return (resp.choices[0].message.content or "") if resp.choices else ""
 
@@ -251,6 +308,23 @@ def call_llm(
             "model": "offline-driver",
             "offline": True,
         }
+
+    if tier == "editor":
+        # Editing models may reject sampling parameters: send none. Never fall back to the driver.
+        model = editor_model()
+        if model and not is_offline():
+            try:
+                text = _openrouter(prompt, system, max_tokens, model=model, temperature=None)
+                return {"text": text, "tier": tier, "model": model, "offline": False}
+            except Exception as e:  # never crash the loop on router failure
+                return {
+                    "text": "",
+                    "tier": tier,
+                    "model": "offline-editor",
+                    "offline": True,
+                    "error": str(e),
+                }
+        return {"text": "", "tier": tier, "model": "offline-editor", "offline": True}
 
     error = ""
     if not is_offline():

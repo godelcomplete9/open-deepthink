@@ -88,6 +88,16 @@ The **symbolic gauge coderivative** `δ_A` then carries the operator back to the
 
 **7. The loop distils itself into the local model.** Each loop appends its heal and control traces to a JSONL dataset. When the loop measurably improves (fewer reasoning rounds per solve, lower ensemble Leak, or higher posture), the adapter scale is raised one step and **clamped into the local llama.cpp driver** through `POST /lora-adapters`. When the next window does not improve, the scale returns to the last good value. Training runs only if the server sets `RSI_LORA_TRAIN_CMD`. Without an adapter, the same traces act as a distilled memory, so a known heal costs one round. That offline stand-in is what the tests measure. In treatise terms, a LoRA is side mass: stock the loop already paid for, folded into weights, making the most-used routes cheaper.
 
+**7b. Optional: weight-space programming.** Instead of raising the scale by a fixed step, a powerful **editing model** (for example Claude Fable 5.2 or GPT-6.2 Astra) can program the adapter. On each improving window it reads the loop metrics and a sample of traces, then returns one JSON program with three parts:
+
+- `data`: traces to drop, shorter answers to rewrite, and up to 16 examples to add;
+- `train`: rank, alpha, dropout, learning rate, epochs and target modules for the trainer;
+- `mix`: a weighted sum of the adapters already loaded on llama.cpp (task arithmetic), applied in one `POST /lora-adapters`.
+
+The engine validates every program before it is used. It snaps the rank to 4–64, caps alpha at 4× rank and the learning rate at 1e-3, and drops unknown modules. It ignores adapter ids that are not loaded, clamps scales to `[0, clamp_max]` (negative only with `allow_negative`), and never drops more than half the dataset. Every correction is logged. The programmed dataset and spec are written next to the raw traces and passed to the trainer as `{dataset}` and `{spec}`. The keep/rollback gate is unchanged: a window that does not improve returns to the last good mix.
+
+The editor is opt-in and has its own tier. It never falls back to the local driver. Without an API key or model id, the program is a deterministic offline one (deduplicated traces, default spec, one clamp step). It sends no sampling parameters, which newer models reject. **It sees trace text that quotes your policy**, so only enable it for policies you may send to that provider.
+
 **8. Space and time.** A covered cell is a (clause, function) pair held by a stable, active agent. The benchmark reports cells covered, reasoning rounds per solve, findings, controls and ensemble Leak for each drive. Faster loops and shorter thinking both widen coverage per unit of time. Coverage means an agent stands for that function. It does not mean the function is secure.
 
 ### Drives and sensitivity
@@ -117,17 +127,18 @@ All values are uncalibrated conventions, as the treatise says of its own ([OG6])
 
 - **Driver** (lattice, heals, control drafting) **must be local**: a llama.cpp server on a loopback or private host, or an in-process model. A remote driver is refused, and driver calls never leave the machine.
 - **Mapper** (table of correspondences) may be remote, via OpenRouter. If it is missing, the driver maps, and the run logs that the recommendation was not met.
+- **Editor** (optional, weight-space programming of the LoRA) may be remote, via OpenRouter: set `RSI_EDITOR_MODEL` or `--editor-model`, or fill *Editing model* in the LoRA panel.
 - **Offline** (Simulation Mode, `--offline`): the real engine with deterministic heuristics and no model calls.
 
 ### Run it
 
 **Web UI:** the **♾️ RSI Loop** tab. Load an example policy, pick a drive, and watch the *Ouroboros Lattice*:
 
-- the loop as a ring with an ingest tail;
+- the loop as a ring with an ingest tail; an accent arc shows how far the current pass has gone;
 - the policy as an outer band, with red chords between contradictory clauses;
-- the gauge spokes running to the agents;
-- agents in species colours, with red halos when leaking and green when stocking;
-- controls born on the band as they are kept.
+- the gauge spokes running to the agents (red where a link is twisted);
+- agents as plain dots, brighter with rank, red while leaking and green while stocking;
+- controls appearing on the band in green as they are kept, and the clamped LoRA scale as an arc around the core.
 
 Findings, controls, the hardened policy, the correspondences, the LoRA history and the loop log are listed below the canvas.
 
@@ -137,6 +148,7 @@ Findings, controls, the hardened policy, the correspondences, the LoRA history a
 deepthink rsi --input examples/security/institution_access_policy.txt --drive leak --iterations 3 --offline
 deepthink rsi --input my_policy.md --drive stock --objective "protect finance data" \
               --driver-url http://localhost:8080/v1 --lora      # local driver, LoRA clamp
+deepthink rsi --input my_policy.md --driver-url http://localhost:8080/v1 --lora               --lora-program --editor-model <router-id> --lora-adapters 0,1   # weight-space programming
 deepthink estimate rsi --iterations 3
 python -m deepthink.nomosloop.benchmark                         # every example × every drive
 ```

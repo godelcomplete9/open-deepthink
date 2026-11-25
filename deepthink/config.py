@@ -208,10 +208,15 @@ class Settings(BaseSettings):
     rsi_mapper_arc_agi2: float | None = Field(
         default=None, description="Declared ARC-AGI-2 score of the mapper"
     )
+    rsi_editor_model: str = Field(
+        default="",
+        validation_alias=AliasChoices("RSI_EDITOR_MODEL", "rsi_editor_model"),
+        description="Router id of the editing model for LoRA weight-space programming (e.g. Claude Fable 5.2, GPT-6.2 Astra)",
+    )
     rsi_lora_train_cmd: str = Field(
         default="",
         validation_alias=AliasChoices("RSI_LORA_TRAIN_CMD", "rsi_lora_train_cmd"),
-        description="Server-side LoRA trainer command ({dataset} {out_dir} {run_id}); never taken from the web UI",
+        description="Server-side LoRA trainer command ({dataset} {spec} {out_dir} {run_id}); never taken from the web UI",
     )
 
     # --- Paths / state ---
