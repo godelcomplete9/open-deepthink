@@ -1,11 +1,15 @@
-"""RSI (recursive self-improvement over formal artifacts) unit tests.
+"""RSI security loop tests (keyless).
 
-Package structure, LangGraph nodes, offline pipeline, the
-injected-LLM bridge, the cost estimator, and the live GUI event stream. Runs keyless (offline heuristics
-or a tiny fake chat model).
+Treatise invariants (Agent Mechanics), the NX-1 gauge objects, the policy
+parser and posture gate, the leak/stock drives, the local-driver rule, the
+LoRA clamp, and the live GUI event stream. Runs offline or with in-process
+fake chat models.
 """
 
 import asyncio
+import json
+import math
+import random
 import sys
 import tempfile
 import traceback
@@ -28,7 +32,31 @@ def chk(name, fn):
         results.append((name, "FAIL", f"{type(e).__name__}: {e}\n{traceback.format_exc()}"))
 
 
-EXAMPLE = ROOT / "examples" / "binary_decimal_fragment.txt"
+ACCESS = ROOT / "examples" / "security" / "institution_access_policy.txt"
+RUNBOOK = ROOT / "examples" / "security" / "incident_response_runbook.txt"
+
+
+def run(text, params, llm=None, mapper=None, events=None):
+    async def go():
+        with tempfile.TemporaryDirectory() as workdir:
+            res = await asyncio.wait_for(
+                __import__("deepthink.nomosloop", fromlist=["run_rsi_pipeline"]).run_rsi_pipeline(
+                    llm,
+                    text,
+                    law_title="t",
+                    params=params,
+                    artifact_path=str(Path(workdir) / "report.md"),
+                    on_event=events.append if events is not None else None,
+                    mapper_llm=mapper,
+                ),
+                timeout=120,
+            )
+            if not res.get("error"):
+                assert Path(res["artifact_path"]).is_file(), res["artifact_path"]
+                assert Path(res["nx1_path"]).is_file(), res["nx1_path"]
+            return res
+
+    return asyncio.run(go())
 
 
 def t1():
@@ -43,194 +71,293 @@ def t1():
     assert callable(run_rsi_pipeline)
     assert LATTICE_VERSION.startswith("lattice/")
     p = default_rsi_params()
-    assert p["iterations"] == 1 and p["offline"] is False
-
-    graph = build_graph()
-    nodes = set(graph.get_graph().nodes)
+    assert p["drive"] == "bal" and p["require_local_driver"] is True
+    nodes = set(build_graph().get_graph().nodes)
     for required in (
         "ingest",
         "scale_induction",
-        "mutation_proposal",
-        "mesh_spawn",
-        "fitness",
+        "correspond",
+        "tick",
+        "heal",
+        "stock",
+        "lora",
         "artifact_emit",
-        "rectify",
     ):
         assert required in nodes, f"missing node {required} in {nodes}"
-
     topo = describe_topology()
-    assert topo["entry"] == "ingest"
-    assert any(e[0] == "rectify" or e[1] == "rectify" for e in topo["edges"])
+    assert topo["entry"] == "ingest" and ["stock", "lora"] in topo["edges"]
 
 
-chk("rsi package imports + graph nodes", t1)
+chk("rsi package imports + leak/stock graph nodes", t1)
 
 
 def t2():
     from deepthink import default_rsi_params, estimate_rsi_cost, run_rsi
+    from deepthink.cost import estimate_rsi_cost as e2
 
-    assert callable(run_rsi)
-    base = estimate_rsi_cost(iterations=1, mutators=0)
-    evolved = estimate_rsi_cost(iterations=2, mutators=6)
-    # induction (4) + iterations * (2N + 1)
-    assert base.llm_calls == 4 + 1 * 1
-    assert evolved.llm_calls == 4 + 2 * 13
-    assert evolved.llm_calls > base.llm_calls
-    assert default_rsi_params()["iterations"] == 1
+    assert callable(run_rsi) and default_rsi_params()["mutators"] == 8
+    leak, stock = estimate_rsi_cost(2, 8, drive="leak"), e2(2, 8, drive="stock")
+    assert leak.llm_calls > 0 and stock.llm_calls > 0
+    assert leak.breakdown["driver_heal"] > stock.breakdown["driver_heal"]
+    assert estimate_rsi_cost(2, 8, cot=False).breakdown["driver_stock"] == 0
 
 
 chk("rsi cost estimator + top-level API", t2)
 
 
 def t3():
-    from deepthink.nomosloop import run_rsi_pipeline
+    from deepthink.nomosloop.mechanics import (
+        IDX,
+        LABEL_TO_STACK,
+        SIDES,
+        VALID_STACKS,
+        Agent,
+        Params,
+        channel_matrix,
+        encounter_mass,
+        klein_stack,
+        stack_label,
+    )
 
-    raw = EXAMPLE.read_text(encoding="utf-8")
+    assert len(VALID_STACKS) == 16
+    families = {frozenset(stack_label(klein_stack(g, s)) for g in SIDES) for s in VALID_STACKS}
+    assert len(families) == 4 and all(len(f) == 4 for f in families)
+    intj = LABEL_TO_STACK["INTJ"]
+    assert [stack_label(klein_stack(g, intj)) for g in SIDES] == ["INTJ", "ESFP", "ENTP", "ISFJ"]
+    # Part I §4, Table 1: m(INTJ, ENFP) = +27 with the schematic R and ego weights (4, 3, 2, 1)
+    R = channel_matrix(Params(r_scale=1.0))
 
-    async def run():
-        with tempfile.TemporaryDirectory() as workdir:
-            artifact = str(Path(workdir) / "artifact.py")
-            res = await run_rsi_pipeline(
-                None,
-                raw,
-                law_title="radix-test",
-                params={"iterations": 1, "mutators": 2, "offline": True},
-                artifact_path=artifact,
-            )
-            # artifact is written inside the temp dir; check before it is removed
-            assert Path(res["artifact_path"]).is_file(), res["artifact_path"]
-            return res
+    def ego(label):
+        w = [0.0] * 8
+        for v, f in zip((4, 3, 2, 1), LABEL_TO_STACK[label]):
+            w[IDX[f]] = v
+        return Agent("B1", "B", LABEL_TO_STACK[label], w)
 
-    res = asyncio.run(run())
-    assert res["mode"] == "rsi"
-    assert res["levels"], "offline induction must produce levels"
-    assert res["num_rules"] >= 1
-    assert res["final_capacity"] + 1e-6 >= res["baseline_capacity"]
-    assert res["artifact_path"].endswith(".py")
-    assert "BASE" in res["proposed_solution"] or "lattice" in res["proposed_solution"].lower()
-    # offline routing is recorded
-    assert all(r.get("offline") for r in res["routing_log"])
+    assert encounter_mass(ego("INTJ"), ego("ENFP"), R) == 27
+    assert encounter_mass(ego("INTJ"), ego("ESFJ"), R) == -34
 
 
-chk("offline RSI pipeline produces lattice + artifact", t3)
+chk("Agent Mechanics: 16 stacks, Klein families, Part I encounter masses", t3)
 
 
 def t4():
-    from deepthink.nomosloop import run_rsi_pipeline
+    from deepthink.nomosloop.mechanics import Agent, Params, arrivals, channel_matrix, tick
 
-    class FakeLLM:
-        def invoke(self, messages):
-            # Invalid lattice JSON -> engine falls back to heuristic lattice.
-            return SimpleNamespace(content="{}")
+    # Proposition 3' (conservation): Σ Δŵ = h[Σι + Σι_E/c − (1+ζ) Σ Leak] when nothing clamps.
+    rnd = random.Random(7)
+    p = Params(h=0.01, zeta=0.2, theta_p=0.3, energy_intake=0.4, r_scale=0.1, q=0.0)
+    R = channel_matrix(p)
+    agents = {}
+    for i in range(6):
+        w = [rnd.uniform(0.5, 2.0) for _ in range(8)]
+        agents[f"A{i}"] = Agent(f"A{i}", "A", (), w, end=0.5, theta_p=p.theta_p)
+        agents[f"A{i}"].energy = {s: [5.0] * 4 for s in ("e", "r", "a", "ra")}
+    edges = {
+        (f"A{i}", f"A{j}"): (math.pi if (i + j) % 5 == 0 else 0.0)
+        for i in range(6)
+        for j in range(6)
+        if i != j
+    }
+    before = sum(a.reserve(p) for a in agents.values())
+    tick(agents, edges, R, p)
+    after = sum(a.reserve(p) for a in agents.values())
+    leak = sum(a.leak_total() for a in agents.values())
+    own = sum(a.own_intake for a in agents.values())
+    expected = p.h * (own / p.c - (1 + p.zeta) * leak)
+    assert abs((after - before) - expected) < 1e-6, (after - before, expected)
+    # Proposition 2 (ii): with no hostile arrival, Leak(w) = w (D+ − w − δ) on 0 < w < D+ − δ.
+    D = 3.0
+    for wv in (0.4, 1.0, 1.4, 2.5, 3.5):
+        weff = [wv] + [0.0] * 7
+        res = arrivals(weff, [("x", [D] + [0.0] * 7)], Params(q=0.0, delta=0.05))
+        lk = res["ov"][0] + res["q"][0] + res["op"][0]
+        want = wv * (D - wv - 0.05) if wv < D - 0.05 else 0.0
+        assert abs(lk - want) < 1e-9, (wv, lk, want)
 
-    raw = EXAMPLE.read_text(encoding="utf-8")
 
-    async def run():
-        with tempfile.TemporaryDirectory() as workdir:
-            artifact = str(Path(workdir) / "artifact.py")
-            return await run_rsi_pipeline(
-                FakeLLM(),
-                raw,
-                law_title="bridge-test",
-                params={"iterations": 1, "mutators": 1},
-                artifact_path=artifact,
-            )
-
-    res = asyncio.run(run())
-    assert res["mode"] == "rsi"
-    assert res["levels"]
-    # bridge was used for every agent call (model tagged bridge-<tier>)
-    assert res["routing_log"], "routing log must be populated"
-    assert all(str(r.get("model", "")).startswith("bridge-") for r in res["routing_log"])
-
-
-chk("injected-LLM bridge drives the RSI loop", t4)
+chk("tick law conserves the total reserve; Leak bound (Prop. 2)", t4)
 
 
 def t5():
-    from deepthink.nomosloop import rewrite
-    from deepthink.nomosloop.state import ScaleLattice
+    from deepthink.nomosloop import correspondence as tc
 
-    lat = ScaleLattice(
-        version="v0",
-        law_id="law-x",
-        levels=[
-            {
-                "level_id": "L1",
-                "name": "top",
-                "alphabet": ["a", "b"],
-                "base": "radix",
-                "base_spec": {"radix": 2, "alphabet": ["0", "1"]},
-                "modulus": "mod",
-                "modulus_spec": {"period": 4},
-                "rules": [
-                    {"id": "R-top", "name": "TOP", "level": "L1", "pattern": "p", "rewrite": "r"}
-                ],
-            },
-            {
-                "level_id": "L0",
-                "name": "base",
-                "alphabet": ["0", "1"],
-                "base": "radix",
-                "base_spec": {"radix": 2, "alphabet": ["0", "1"]},
-                "modulus": "mod",
-                "modulus_spec": {"period": 256},
-                "rules": [
-                    {"id": "R-leaf", "name": "LEAF", "level": "L0", "pattern": "p", "rewrite": "r"}
-                ],
-            },
-        ],
-        order="top->base",
-        expansion_map={"R-top": ["R-leaf"]},
-        provenance={},
-        created_at=0.0,
-    )
-    cap = rewrite.measured_capacity(lat)
-    assert cap["instances"] == 256, cap
-    assert cap["capacity"] > 0
+    # gauge invariance of curvature on random squares
+    rnd = random.Random(3)
+    links = {}
+    squares = []
+    for k in range(20):
+        a1, a2, i1, i2 = f"a{k}", f"b{k}", f"i{k}", f"j{k}"
+        for e in ((a1, a2), (a2, i2), (i1, i2), (a1, i1)):
+            links[e] = rnd.uniform(0, math.pi)
+        squares.append((a1, a2, i1, i2))
+    chi = {v: rnd.uniform(-3, 3) for e in links for v in e}
+    moved = tc.gauge_transform(links, chi)
+    for sq in squares:
+        assert abs(tc.square_curvature(links, *sq) - tc.square_curvature(moved, *sq)) < 1e-9
+    # a contradiction between cooperating agents is maximally frustrated
+    assert tc.frustration(tc.curvature(math.pi, 0.0, 0.0, 0.0)) > 0.999
+    assert tc.frustration(tc.curvature(0.0, 0.1, 0.1, 0.0)) < 1e-9
+    # coderivative: aligned rows carry the edit, anti-aligned rows its inverse
+    rows = [
+        tc.TocRow(1, "pol/L2/§1", "A1", [], [1] + [0] * 7, {}, "A", "", "", 0.1, 0.8, "m"),
+        tc.TocRow(2, "pol/L2/§2", "A1", [], [1] + [0] * 7, {}, "A", "", "", 3.0, 0.8, "m"),
+    ]
+    edits = tc.coderivative("r", "A1", rows)
+    assert [e.inverse for e in edits] == [False, True]
+    assert edits[0].symbol == tc.EDITS["r"]
 
 
-chk("measured capacity executes the rewrite structure", t5)
+chk("gauge: curvature invariant under A -> A + d0 chi; coderivative", t5)
 
 
 def t6():
-    import json
+    from deepthink.nomosloop import security
 
-    from deepthink.nomosloop import graph, run_rsi_pipeline
+    lat = security.parse_policy(ACCESS.read_text(encoding="utf-8"), "x")
+    ids = {lv["level_id"]: [r["id"] for r in lv["rules"]] for lv in lat["levels"]}
+    assert (
+        ids["L3"] == ["§1"] and "§13" in ids["L0"] and "§7" in ids["L2"] and "§10" in ids["L1"]
+    ), ids
+    pairs = {(a.split("/")[-1], b.split("/")[-1]) for a, b, _ in security.contradictions(lat)}
+    assert pairs == {("§2", "§7"), ("§5", "§8")}, pairs
+    rb = security.parse_policy(RUNBOOK.read_text(encoding="utf-8"), "y")
+    pos = security.posture(rb)
+    assert pos["contradictions"] == 0 and "Ne" in pos["missing"]
+    assert any(lv["level_id"] == "L1" for lv in security.ensure_controls_level(rb)["levels"])
 
-    raw = EXAMPLE.read_text(encoding="utf-8")
-    events = []
 
-    async def run():
-        with tempfile.TemporaryDirectory() as workdir:
-            return await run_rsi_pipeline(
-                None,
-                raw,
-                params={"iterations": 2, "mutators": 3, "offline": True},
-                artifact_path=str(Path(workdir) / "artifact.py"),
-                on_event=events.append,
+chk("security parser: levels, the two seeded contradictions, gaps", t6)
+
+
+def t7():
+    text = ACCESS.read_text(encoding="utf-8")
+    leak = run(text, {"offline": True, "drive": "leak", "iterations": 3})
+    stock = run(text, {"offline": True, "drive": "stock", "iterations": 3})
+    for res in (leak, stock):
+        assert res["mode"] == "rsi" and res["domain"] == "cybersecurity", res.get("error")
+        assert res["posture_final"] + 1e-9 >= res["posture_baseline"]
+        assert all(r.get("offline") for r in res["routing_log"])
+        assert res["ensembles"] and res["agents"] and res["toc"]
+        for e in res["ensembles"]:
+            assert (
+                e["text"].startswith(e["title"] + "[n=") and f"n={len(e['members'])};" in e["text"]
+            )
+        for a in res["agents"]:
+            assert not (a["name"].startswith("Attr-") and a["L"] > 0), a["name"]
+    assert len(leak["findings"]) > len(stock["findings"])
+    assert len(stock["controls"]) > len(leak["controls"])
+    seeded = {("pol/L2/§2", "pol/L2/§7"), ("pol/L2/§5", "pol/L2/§8")}
+    found = {(c["a1"], c["a2"]) for f in leak["findings"] for c in f["clashes"]}
+    assert found & seeded, found
+    for c in stock["controls"]:
+        assert c["posture_after"] > c["posture_before"]
+
+
+chk("offline loop: leak finds the seeded clashes, stock evolves the policy", t7)
+
+
+def t8():
+    calls = []
+
+    class FakeLocal:
+        def invoke(self, messages):
+            calls.append(messages[-1][1][:40])
+            return SimpleNamespace(
+                content="Rotate the credentials and restrict the share to business hours."
             )
 
-    res = asyncio.run(run())
-    # every node is bracketed by enter/exit, and the loop re-enters mutation_proposal
-    assert events[0]["phase"] == "enter" and events[0]["node"] == "ingest", events[0]
-    assert events[-1]["phase"] == "exit" and events[-1]["node"] == "rectify", events[-1]
-    assert sum(1 for e in events if e["phase"] == "enter") == sum(
-        1 for e in events if e["phase"] == "exit"
+    res = run(
+        ACCESS.read_text(encoding="utf-8"), {"drive": "leak", "iterations": 1}, llm=FakeLocal()
     )
+    assert not res.get("error"), res.get("error")
+    assert res["routing_log"] and all(
+        str(r["model"]).startswith("bridge-") for r in res["routing_log"]
+    )
+    assert any(r["model"] == "bridge-driver-as-mapper" for r in res["routing_log"])
+    assert calls, "driver bridge never called"
+
+    class Remote(FakeLocal):
+        base_url = "https://api.example.com/v1"
+
+    from deepthink.nomosloop import run_rsi_pipeline
+
+    try:
+        asyncio.run(
+            run_rsi_pipeline(
+                Remote(), "§1 Staff must use MFA.\n§2 Logs are kept.", params={"iterations": 1}
+            )
+        )
+    except ValueError as e:
+        assert "must be local" in str(e)
+    else:
+        raise AssertionError("a remote driver must be refused")
+    from deepthink.nomosloop.routing import is_local_url
+
+    assert is_local_url("http://localhost:8080/v1") and is_local_url("http://192.168.1.20:8080")
+    assert not is_local_url("https://openrouter.ai/api/v1")
+
+
+chk("driver bridge is local-only; mapper falls back to the driver", t8)
+
+
+def t9():
+    from deepthink.nomosloop import lora
+
+    sent = []
+
+    def fake_http(url, method="GET", body=None, timeout=5.0):
+        sent.append((url, method, body))
+        return True, {"ok": True}
+
+    orig = lora._http
+    lora._http = fake_http
+    try:
+        cfg = lora.LoraConfig(
+            enabled=True, base_url="http://localhost:8080/v1", adapter_id=2, clamp_step=0.25
+        )
+        st = lora.LoraState()
+        r1 = lora.step(
+            cfg, st, {"rounds_per_solve": 3.0, "leak": 0.3, "capacity": 0.2, "solves": 2}, "run", 1
+        )
+        assert r1["decision"] == "raise" and st.scale == 0.25 and st.good_scale == 0.0
+        r2 = lora.step(
+            cfg, st, {"rounds_per_solve": 2.0, "leak": 0.2, "capacity": 0.3, "solves": 4}, "run", 2
+        )
+        assert r2["decision"] == "raise" and st.scale == 0.5 and st.good_scale == 0.25
+        r3 = lora.step(
+            cfg, st, {"rounds_per_solve": 4.0, "leak": 0.4, "capacity": 0.3, "solves": 5}, "run", 3
+        )
+        assert r3["decision"] == "rollback" and st.scale == 0.25
+    finally:
+        lora._http = orig
+    assert sent[-1] == ("http://localhost:8080/lora-adapters", "POST", [{"id": 2, "scale": 0.25}])
+    assert lora.train(lora.LoraConfig(), st, "run")["ran"] is False
+
+
+chk("LoRA clamp: raise on improvement, roll back otherwise", t9)
+
+
+def t10():
+    from deepthink.nomosloop import graph
+
+    events = []
+    res = run(
+        RUNBOOK.read_text(encoding="utf-8"),
+        {"offline": True, "drive": "bal", "iterations": 2},
+        events=events,
+    )
+    assert not res.get("error"), res.get("error")
+    assert events[0]["phase"] == "enter" and events[0]["node"] == "ingest"
+    assert events[-1]["phase"] == "exit" and events[-1]["node"] == "artifact_emit"
     entered = [e["node"] for e in events if e["phase"] == "enter"]
-    assert entered.count("mutation_proposal") == 2, entered
-    # snapshots are JSON-safe and carry the lattice, mesh, agents, and swarm
-    last = events[-1]["state"]
+    assert entered.count("correspond") == 2 and entered.count("lora") == 2, entered
     json.dumps(events)
-    assert last["lattice"]["levels"] and last["mesh"]["nodes"] and last["agents"]
-    assert last["proposals"] and last["capacity"]
-    assert res["snapshot"]["lattice"]["version"] == res["lattice_version"]
-    # the observer is cleared once the run ends
+    last = events[-1]["state"]
+    assert last["agents"] and last["toc"] and last["posture"] and "lora" in last
     assert graph._OBSERVER is None
 
 
-chk("live on_event stream brackets every node with snapshots", t6)
+chk("live on_event stream brackets every node with snapshots", t10)
 
 
 ok = sum(1 for _, s, _ in results if s == "OK")

@@ -1,14 +1,23 @@
-"""
-RSI pipeline entrypoint — wire params → LangGraph RSI loop → result.
+"""RSI pipeline entrypoint: params -> LangGraph leak/stock loop -> result.
 
-This is the fourth open-deepthink section: **recursive self-improvement (RSI)
-over formal artifacts** (code repositories, math models, physics models, a
-collection of repos and documentation) that follow formal structures.
+The fourth open-deepthink section: **recursive self-improvement for
+cybersecurity**. The artifact is an institution's security policy. Agent
+Mechanics agents stand for its clauses, moduli and viable control
+operations. Leaking agents produce inspection findings, and stocking agents
+evolve the policy with posture-gated controls. A LoRA loop distils the traces
+into the local driver model.
 
-Model-agnostic: any LangChain-compatible chat model works (OpenRouter,
-llama.cpp, mocks). When ``llm`` is provided, every cheap/frontier sub-agent
-call is routed through it via an injected bridge; when ``llm`` is ``None`` (or
-``offline=True``) the deterministic offline heuristics run keyless.
+Model roles:
+
+* ``llm``, the **driver**, must be local: in-process, or a llama.cpp /
+  private-network endpoint. It drives the lattice, the heals and the control
+  drafting. ``require_local_driver`` (default True) refuses a remote driver.
+* ``mapper_llm``, optional, builds the table of correspondences. A model
+  above 70 on ARC-AGI-2 is recommended. Declare its score with
+  ``params["mapper_arc_agi2"]`` (it is recorded, not verified).
+
+With ``llm=None`` or ``offline=True`` everything runs on deterministic
+offline heuristics, keyless.
 """
 
 from __future__ import annotations
@@ -21,118 +30,39 @@ from collections.abc import Callable
 from typing import Any
 
 from .graph import describe_topology, run_pipeline, set_observer
+from .routing import is_local_llm, llm_endpoint
+from .world import World
 
 LogFn = Callable[[str], Any] | None
 EventFn = Callable[[dict[str, Any]], Any] | None
 
-# Caps keep live GUI events small even for large lattices / meshes.
-_SNAP_MAX_MESH = 160
-_SNAP_MAX_PROPOSALS = 48
-
-
-def snapshot_state(state: dict[str, Any]) -> dict[str, Any]:
-    """JSON-safe, size-capped view of an RSI state for live visualisation.
-
-    Shape (all keys always present)::
-
-        lattice:   {version, levels:[{id,name,base,modulus,rules:[{id,name}]}]}
-        capacity:  [{version, iteration, capacity, instances, coverage, source}]
-        proposals: [{id, op, level, status, score, author}]
-        mesh:      {nodes:[{id, level, rule}], edges:[[src, dst, rel]]}
-        agents:    [{id, node, level, gen, offspring}]
-        rollbacks, iteration, max_iterations, baseline_capacity
-    """
-    lat = state.get("scale_lattice", {}) or {}
-    levels = []
-    for lv in lat.get("levels", []) or []:
-        levels.append(
-            {
-                "id": str(lv.get("level_id", "?")),
-                "name": str(lv.get("name", "")),
-                "base": str(lv.get("base", "")),
-                "modulus": str(lv.get("modulus", "")),
-                "rules": [
-                    {"id": str(r.get("id", "")), "name": str(r.get("name", ""))}
-                    for r in lv.get("rules", []) or []
-                ],
-            }
-        )
-    nodes = (state.get("mesh_nodes", []) or [])[:_SNAP_MAX_MESH]
-    keep = {n.get("id") for n in nodes}
-    edges = [
-        [e[0], e[1], e[2] if len(e) > 2 else "expands-to"]
-        for e in state.get("mesh_edges", []) or []
-        if e[0] in keep and e[1] in keep
-    ]
-    agents = [
-        {
-            "id": a.get("id"),
-            "node": a.get("node_id"),
-            "level": a.get("level"),
-            "gen": int(a.get("generation", 0) or 0),
-            "offspring": len(a.get("offspring", []) or []),
-        }
-        for a in (state.get("inhabitants", []) or [])
-        if a.get("node_id") in keep
-    ]
-    props = [
-        {
-            "id": p.get("id"),
-            "op": p.get("operation"),
-            "level": p.get("target_level"),
-            "status": p.get("status"),
-            "score": p.get("test_score"),
-            "author": p.get("author_agent"),
-        }
-        for p in (state.get("mutation_proposals", []) or [])[-_SNAP_MAX_PROPOSALS:]
-    ]
-    caps = [
-        {
-            "version": c.get("version"),
-            "iteration": c.get("iteration"),
-            "capacity": float(c.get("capacity", 0.0) or 0.0),
-            "instances": int(c.get("instances", 0) or 0),
-            "coverage": float(c.get("coverage", 0.0) or 0.0),
-            "source": c.get("source"),
-        }
-        for c in state.get("capacity_history", []) or []
-    ]
-    return {
-        "lattice": {"version": lat.get("version"), "levels": levels},
-        "capacity": caps,
-        "baseline_capacity": float(state.get("baseline_capacity", 0.0) or 0.0),
-        "proposals": props,
-        "mesh": {
-            "nodes": [
-                {
-                    "id": n.get("id"),
-                    "level": str(n.get("scale_level", "?")),
-                    "rule": str(n.get("parent_rule", "")),
-                }
-                for n in nodes
-            ],
-            "edges": edges,
-        },
-        "agents": agents,
-        "rollbacks": state.get("rollbacks", []) or [],
-        "iteration": int(state.get("iteration", 0) or 0),
-        "max_iterations": int(state.get("max_iterations", 1) or 1),
-    }
+DRIVES = ("leak", "stock", "bal")
 
 
 def default_rsi_params() -> dict[str, Any]:
     """Documented RSI defaults for harnesses / library callers."""
     return {
         "iterations": 1,
-        "mutators": None,  # None -> env NOMOSLOOP_MUTATORS or 6; 0 = baseline
-        "law_title": "untitled-law",
+        "mutators": 8,  # cap on viable control operations (agents); 0 = none
+        "law_title": "untitled-policy",
         "artifact_path": "",
         "offline": False,
+        "drive": "bal",  # leak (defensive) | stock (evolving) | bal
+        "lambda_am": 0.7,  # 0 = artifact signals only, 1 = Agent Mechanics balance only
+        "sensitivity": {},  # overrides of mechanics.Params / drive presets
+        "ticks_per_loop": 3,
+        "heal_budget": None,  # None = drive preset
+        "stock_budget": None,
+        "objective": "",  # security objective that guides findings and controls
+        "cot": True,  # ask the driver for findings/controls text
+        "lora": {},  # LoraConfig fields: enabled, base_url, adapter_id, clamp_max, ...
+        "mapper_arc_agi2": None,  # declared ARC-AGI-2 score of the mapper
+        "require_local_driver": True,
     }
 
 
 def _make_bridge(llm):
-    """Adapt a LangChain chat model to the engine's sync ``call_llm`` bridge."""
+    """Adapt a LangChain chat model to the engine's sync bridge."""
 
     def bridge(prompt: str, task_kind: str, system: str, max_tokens: int, tier: str):
         messages: list[tuple[str, str]] = []
@@ -142,48 +72,79 @@ def _make_bridge(llm):
         resp = llm.invoke(messages)
         content = getattr(resp, "content", resp)
         if isinstance(content, list):
-            parts = []
-            for p in content:
-                if isinstance(p, dict):
-                    parts.append(str(p.get("text", "")))
-                else:
-                    parts.append(str(p))
-            content = "".join(parts)
+            content = "".join(
+                str(p.get("text", "")) if isinstance(p, dict) else str(p) for p in content
+            )
         return None if content is None else str(content)
 
     return bridge
 
 
-def _summarize(state: dict) -> str:
-    """Compact markdown summary used as ``proposed_solution``."""
+def snapshot_state(state: dict[str, Any]) -> dict[str, Any]:
+    """JSON-safe, size-capped view of a run for live visualisation."""
     lat = state.get("scale_lattice", {}) or {}
-    caps = state.get("capacity_history", []) or []
-    final = caps[-1] if caps else {}
-    levels = [str(lv.get("level_id")) for lv in lat.get("levels", [])]
-    lines = [
-        f"# RSI — {state.get('law_title', 'untitled-law')}",
-        "",
-        f"- lattice: **{lat.get('version', '?')}**  levels: {', '.join(levels) or '—'}",
-        f"- motifs: {len(state.get('motifs', []))}  holdout: {len(state.get('holdout_motifs', []))}",
-        f"- proposals: {len(state.get('mutation_proposals', []))}  "
-        f"accepted: {len(state.get('accepted_mutations', []))}  "
-        f"rollbacks: {len(state.get('rollbacks', []))}",
-        f"- measured capacity: baseline={state.get('baseline_capacity', 0.0):.3f} "
-        f"→ final={final.get('capacity', 0.0):.3f}  "
-        f"instances={final.get('instances', 0)}",
-        f"- mesh: {state.get('fitness_report', {}).get('mesh_size', 0)} instantiations",
-        f"- artifact: `{state.get('artifact_path', '')}`",
-        "",
-        "## Scale lattice",
+    levels = [
+        {
+            "id": str(lv.get("level_id", "?")),
+            "name": str(lv.get("name", "")),
+            "base": str(lv.get("base", "")),
+            "modulus": str(lv.get("modulus", "")),
+            "rules": [
+                {
+                    "id": str(r.get("id", "")),
+                    "name": str(r.get("name", "")),
+                    "rsi": str(r.get("provenance", "")).startswith("rsi:"),
+                }
+                for r in lv.get("rules", []) or []
+            ],
+        }
+        for lv in lat.get("levels", []) or []
     ]
-    for lvl in lat.get("levels", []):
-        lines.append(f"### {lvl.get('level_id')} — {lvl.get('name', '')}")
-        lines.append(f"- BASE: {lvl.get('base', '?')}")
-        lines.append(f"- MODULUS: {lvl.get('modulus', '?')}")
-        for r in lvl.get("rules", []):
-            lines.append(
-                f"- `{r.get('id')}` {r.get('name', '')}: {r.get('pattern', '')} ⇒ {r.get('rewrite', '')}"
-            )
+    world = state.get("world")
+    w = world.snapshot() if isinstance(world, World) else {}
+    lst = state.get("lora_state")
+    keys = (
+        "version",
+        "iteration",
+        "score",
+        "diversity",
+        "contradictions",
+        "source",
+        "functions",
+        "missing",
+    )
+    return {
+        "lattice": {"version": lat.get("version"), "levels": levels},
+        "posture": [{k: p.get(k) for k in keys} for p in state.get("posture_history", []) or []],
+        "controls": (state.get("controls", []) or [])[-40:],
+        "rollbacks": (state.get("rollbacks", []) or [])[-20:],
+        "lora": lst.as_dict() if hasattr(lst, "as_dict") else {},
+        "iteration": int(state.get("iteration", 0) or 0),
+        "max_iterations": int(state.get("max_iterations", 1) or 1),
+        **w,
+    }
+
+
+def _summary(state: dict[str, Any], world: World | None) -> str:
+    post = state.get("posture_history", []) or []
+    first, last = (post[0], post[-1]) if post else ({}, {})
+    version = (state.get("scale_lattice") or {}).get("version", "?")
+    lines = [
+        f"# RSI security loop: {state.get('law_title', 'policy')}",
+        "",
+        f"- policy **{version}** · posture {first.get('score', 0):.3f} → **{last.get('score', 0):.3f}**",
+        f"- findings: {len(world.inspections) if world else 0} · controls kept: "
+        f"{len(state.get('controls', []) or [])} · rolled back: {len(state.get('rollbacks', []) or [])}",
+    ]
+    if world:
+        lines.append(
+            f"- agents: {len(world.live())} alive · ensembles: {len(world.ensembles)} · "
+            f"L_G {world.ensemble_leak():.3f} · rounds/solve {world.rounds_per_solve():.2f}"
+        )
+    lines += [
+        "",
+        f"Full report: `{state.get('artifact_path', '')}` · NX-1 log: `{state.get('nx1_path', '')}`",
+    ]
     return "\n".join(lines)
 
 
@@ -191,7 +152,7 @@ async def run_rsi_pipeline(
     llm,
     raw_text: str,
     *,
-    law_title: str = "untitled-law",
+    law_title: str = "untitled-policy",
     iterations: int = 1,
     mutators: int | None = None,
     artifact_path: str = "",
@@ -200,66 +161,81 @@ async def run_rsi_pipeline(
     session_store: dict | None = None,
     session_id: str = "",
     on_event: EventFn = None,
+    mapper_llm=None,
 ) -> dict[str, Any]:
-    """
-    Run the full RSI pipeline over a formal artifact.
+    """Run the RSI security loop over a policy text.
 
-    Parameters
-    ----------
-    llm :
-        LangChain-compatible chat model (or ``None`` for offline heuristics).
-    raw_text :
-        The formal artifact text (code repo docs, math/physics model, spec, …).
-    law_title, iterations, mutators, artifact_path :
-        Loop controls; ``params`` overrides them.
-    params :
-        Optional dict merged over :func:`default_rsi_params`.
-    log :
-        Optional sync/async callable receiving log lines.
-    session_store, session_id :
-        Optional disk-backed store to persist the final result.
-    on_event :
-        Optional **sync** callable receiving live node events
-        ``{"phase": "enter"|"exit", "node", "iteration", "log", "state"}``
-        (``state`` is :func:`snapshot_state`). It is invoked from the worker
-        thread that runs the graph, so it must be thread-safe.
-
-    Returns
-    -------
-    dict with the final lattice, measured capacity history, artifact, and logs.
+    ``on_event`` (sync, called from the worker thread) receives
+    ``{"phase": "enter"|"exit", "node", "iteration", "log", "state"}`` where
+    ``state`` is :func:`snapshot_state`.
     """
 
-    async def _log(msg: str):
+    async def _log(msg: str) -> None:
         if log is None:
             return
         result = log(msg)
         if hasattr(result, "__await__"):
             await result
 
-    p = {**default_rsi_params(), **(params or {})}
-    # Explicit keyword arguments win unless ``params`` set the key itself.
-    if "law_title" not in (params or {}):
-        p["law_title"] = law_title
-    if "iterations" not in (params or {}):
-        p["iterations"] = iterations
-    if "mutators" not in (params or {}):
-        p["mutators"] = mutators
-    if "artifact_path" not in (params or {}):
-        p["artifact_path"] = artifact_path
-    law_title = str(p.get("law_title") or "untitled-law")
-    iterations = int(p.get("iterations", 1))
-    mutators = p.get("mutators", None)
-    artifact_path = str(p.get("artifact_path") or "")
+    given = dict(params or {})
+    p = {**default_rsi_params(), **given}
+    for key, val in (
+        ("law_title", law_title),
+        ("iterations", iterations),
+        ("mutators", mutators),
+        ("artifact_path", artifact_path),
+    ):
+        if key not in given and val is not None:
+            p[key] = val
+    if p.get("mutators") is None:
+        p["mutators"] = 8
     offline = bool(p.get("offline", False))
+    drive = str(p.get("drive") or "bal")
+    if drive not in DRIVES:
+        raise ValueError(f"drive must be one of {DRIVES}, got {drive!r}")
+    if (
+        llm is not None
+        and not offline
+        and p.get("require_local_driver", True)
+        and not is_local_llm(llm)
+    ):
+        raise ValueError(
+            "The RSI driver model must be local (in-process or llama.cpp on a local/private host); "
+            f"got endpoint {llm_endpoint(llm)!r}. Pass a remote model as mapper_llm instead."
+        )
+    rsi_cfg = {
+        "drive": drive,
+        "lambda_am": float(p.get("lambda_am", 0.7)),
+        "sensitivity": dict(p.get("sensitivity") or {}),
+        "ticks_per_loop": int(p.get("ticks_per_loop", 3)),
+        "heal_budget": p.get("heal_budget"),
+        "stock_budget": p.get("stock_budget"),
+        "objective": str(p.get("objective") or ""),
+        "cot": bool(p.get("cot", True)),
+        "mapper_arc_agi2": p.get("mapper_arc_agi2"),
+    }
+    lora_cfg = dict(p.get("lora") or {})
+    if lora_cfg.get("enabled") and not lora_cfg.get("base_url") and llm is not None:
+        url = llm_endpoint(llm)
+        if url:
+            lora_cfg["base_url"] = url
+    lora_cfg.setdefault("train_cmd", os.environ.get("RSI_LORA_TRAIN_CMD", ""))
+    if llm is None or offline:
+        driver_desc = "offline"
+    else:
+        driver_desc = llm_endpoint(llm) or "in-process"
+    if offline:
+        mapper_desc = "offline-lexicon"
+    elif mapper_llm is not None:
+        mapper_desc = llm_endpoint(mapper_llm) or "in-process"
+    elif os.environ.get("OPENROUTER_API_KEY"):
+        mapper_desc = "openrouter"
+    else:
+        mapper_desc = "driver-fallback"
 
     await _log(
-        f"--- [RSI] RSI over formal artifact: title={law_title!r} "
-        f"chars={len(raw_text)} iterations={iterations} mutators={mutators} "
-        f"offline={offline} ---"
-    )
-    await _log(
-        "LOG: [RSI] Philosophy: compression + generativity beats description; "
-        "every pattern is elevatable; no descriptive bloat without worldly capacity."
+        f"--- [RSI] security loop: title={p['law_title']!r} chars={len(raw_text)} iterations={p['iterations']} "
+        f"drive={drive} λ_AM={rsi_cfg['lambda_am']} offline={offline} driver={driver_desc} mapper={mapper_desc} ---"
     )
 
     def _observer(phase: str, node: str, state: dict, update: dict | None) -> None:
@@ -281,26 +257,27 @@ async def run_rsi_pipeline(
 
         if on_event is not None:
             set_observer(_observer)
-        bridge = None
-        if llm is not None and not offline:
-            bridge = _make_bridge(llm)
-            routing.set_llm_bridge(bridge)
         old_offline = os.environ.get("NOMOSLOOP_OFFLINE")
         if offline:
             os.environ["NOMOSLOOP_OFFLINE"] = "1"
+        if llm is not None and not offline:
+            routing.set_llm_bridge(_make_bridge(llm))
+        if mapper_llm is not None and not offline:
+            routing.set_tier_bridge("mapper", _make_bridge(mapper_llm))
         try:
             return run_pipeline(
                 raw_text,
-                law_title=law_title,
-                max_iterations=iterations,
-                artifact_path=artifact_path,
-                mutators=mutators,
+                law_title=str(p["law_title"]),
+                max_iterations=int(p["iterations"]),
+                artifact_path=str(p.get("artifact_path") or ""),
+                mutators=int(p["mutators"]),
+                rsi_cfg=rsi_cfg,
+                lora_cfg=lora_cfg,
             )
         finally:
             if on_event is not None:
                 set_observer(None)
-            if bridge is not None:
-                routing.clear_llm_bridge()
+            routing.clear_llm_bridge()
             if offline:
                 if old_offline is None:
                     os.environ.pop("NOMOSLOOP_OFFLINE", None)
@@ -309,54 +286,59 @@ async def run_rsi_pipeline(
 
     try:
         state = await asyncio.to_thread(_run_sync)
-
         for line in state.get("topology_log", []):
             await _log(f"  · {line}")
-        await _log(f"LOG: [RSI] artifact written to {state.get('artifact_path')}")
-
+        world = state.get("world") if isinstance(state.get("world"), World) else None
         lat = state.get("scale_lattice", {}) or {}
-        caps = state.get("capacity_history", []) or []
-        final = caps[-1] if caps else {}
+        post = state.get("posture_history", []) or []
+        lst = state.get("lora_state")
         result = {
             "mode": "rsi",
+            "domain": "cybersecurity",
             "run_id": state.get("run_id"),
             "law_id": state.get("law_id"),
             "law_title": state.get("law_title"),
+            "policy_version": lat.get("version"),
             "lattice_version": lat.get("version"),
             "levels": [str(lv.get("level_id")) for lv in lat.get("levels", [])],
             "num_levels": len(lat.get("levels", []) or []),
             "num_rules": sum(len(lv.get("rules", []) or []) for lv in lat.get("levels", []) or []),
-            "motifs": len(state.get("motifs", []) or []),
-            "holdout_motifs": len(state.get("holdout_motifs", []) or []),
-            "proposals": len(state.get("mutation_proposals", []) or []),
-            "accepted_mutations": [m.get("id") for m in state.get("accepted_mutations", []) or []],
+            "drive": drive,
+            "lambda_am": rsi_cfg["lambda_am"],
+            "driver": {"endpoint": driver_desc, "local": True},
+            "mapper": {"endpoint": mapper_desc, "arc_agi2_declared": rsi_cfg["mapper_arc_agi2"]},
+            "posture_baseline": float(post[0]["score"]) if post else 0.0,
+            "posture_final": float(post[-1]["score"]) if post else 0.0,
+            "posture_history": post,
+            "controls": state.get("controls", []) or [],
             "rollbacks": state.get("rollbacks", []) or [],
-            "baseline_capacity": float(state.get("baseline_capacity", 0.0) or 0.0),
-            "final_capacity": float(final.get("capacity", 0.0) or 0.0),
-            "final_instances": int(final.get("instances", 0) or 0),
-            "final_coverage": float(final.get("coverage", 0.0) or 0.0),
-            "capacity_history": caps,
-            "mesh_size": state.get("fitness_report", {}).get("mesh_size", 0),
-            "mesh_stats": state.get("fitness_report", {}).get("mesh_stats", {}),
+            "findings": sorted(world.inspections, key=lambda x: -x.get("severity", 0.0))
+            if world
+            else [],
+            "ensembles": world.ensembles if world else [],
+            "agents": [world.agent_view(a) for a in world.agents.values()] if world else [],
+            "toc": [r.as_dict() for r in world.rows] if world else [],
+            "events": world.events if world else [],
+            "coverage": world.coverage_history if world else [],
+            "rounds_per_solve": round(world.rounds_per_solve(), 4) if world else 0.0,
+            "lora": lst.as_dict() if hasattr(lst, "as_dict") else {},
             "iteration": int(state.get("iteration", 0) or 0),
             "artifact_path": state.get("artifact_path", ""),
             "artifact_code": state.get("artifact_code", ""),
+            "nx1_path": state.get("nx1_path", ""),
             "scale_lattice": lat,
             "topology": describe_topology(),
             "topology_log": state.get("topology_log", []) or [],
             "routing_log": state.get("routing_log", []) or [],
-            "proposed_solution": _summarize(state),
+            "proposed_solution": _summary(state, world),
             "snapshot": snapshot_state(state),
         }
-
         if session_store is not None and session_id in session_store:
             session_store[session_id]["rsi_result"] = result
             session_store[session_id]["final_solution"] = result
-
         await _log(f"FINAL_ANSWER: {json.dumps(result.get('proposed_solution'))}")
         await _log("SUCCESS: RSI LangGraph execution completed.")
         return result
-
     except Exception as e:
         await _log(f"RSI Pipeline Error: {e}")
         await _log(traceback.format_exc())

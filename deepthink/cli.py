@@ -7,7 +7,7 @@ Usage::
     deepthink serve           # same
     deepthink qnn  --prompt "…" [--debug]
     deepthink qdad --prompt "…" [--debug]
-    deepthink rsi  --input artifact.txt [--iterations N] [--offline]
+    deepthink rsi  --input policy.txt [--drive leak|stock|bal] [--offline]
     deepthink version
 """
 
@@ -205,14 +205,30 @@ def cmd_qdad(args: argparse.Namespace) -> int:
 
 def cmd_rsi(args: argparse.Namespace) -> int:
     from deepthink import run_rsi
+    from deepthink.config import get_settings
+    from deepthink.cost import estimate_rsi_cost
 
-    # Only explicit overrides — defaults are applied inside the pipeline so
-    # they never clobber the CLI's law_title / artifact_path.
-    params: dict = {"offline": bool(args.offline)}
+    cfg = get_settings()
+    offline = bool(args.offline or args.debug)
+    params: dict = {
+        "offline": offline,
+        "drive": args.drive,
+        "lambda_am": args.lambda_am,
+        "objective": args.objective or "",
+        "ticks_per_loop": args.ticks,
+    }
     if args.iterations:
         params["iterations"] = args.iterations
     if args.mutators is not None:
         params["mutators"] = args.mutators
+    if args.mapper_arc_agi2 is not None:
+        params["mapper_arc_agi2"] = args.mapper_arc_agi2
+    if args.lora:
+        params["lora"] = {
+            "enabled": True,
+            "adapter_id": args.lora_adapter_id,
+            "clamp_max": args.lora_clamp_max,
+        }
 
     try:
         with open(args.input, encoding="utf-8", errors="replace") as f:
@@ -221,34 +237,52 @@ def cmd_rsi(args: argparse.Namespace) -> int:
         print(f"Failed to read --input {args.input!r}: {e}", file=sys.stderr)
         return 2
     if not raw_text.strip():
-        print(f"--input {args.input!r} is empty; nothing to induce.", file=sys.stderr)
+        print(f"--input {args.input!r} is empty; nothing to analyse.", file=sys.stderr)
         return 2
-
-    from deepthink.cost import estimate_rsi_cost
 
     est = estimate_rsi_cost(
         iterations=int(params.get("iterations") or 1),
-        mutators=int(params.get("mutators") or 0),
+        mutators=int(params.get("mutators") if params.get("mutators") is not None else 8),
+        drive=args.drive,
     )
     print(est.summary_line(), file=sys.stderr)
-    if (
-        not args.offline
-        and not args.debug
-        and not getattr(args, "yes", False)
-        and est.llm_calls > 80
-    ):
+    if not offline and not args.yes and est.llm_calls > 120:
         print(
             "Refusing large run without --yes "
-            f"({est.llm_calls} estimated calls). Shrink iterations/mutators or pass --yes.",
+            f"({est.llm_calls} estimated calls). Shrink iterations or pass --yes.",
             file=sys.stderr,
         )
         return 2
 
-    llm = None if args.offline else _build_llm(args)
+    llm = None
+    mapper = None
+    if not offline:
+        from deepthink.models import ChatLlamaCpp
 
-    artifact = args.artifact or ""
-    if not artifact:
-        artifact = os.path.join("artifacts", f"artifact_rsi_{args.title}.py")
+        url = (
+            (args.driver_url or cfg.normalize_llamacpp_url())
+            .rstrip("/")
+            .replace("/chat/completions", "")
+        )
+        llm = ChatLlamaCpp(
+            base_url=url,
+            api_key="no-key-required",
+            model=args.driver_model or cfg.llamacpp_model,
+            temperature=0.3,
+            max_tokens=1024,
+        )
+        key = args.api_key or os.environ.get("OPENROUTER_API_KEY", "")
+        if key:
+            from langchain_openai import ChatOpenAI
+
+            mapper = ChatOpenAI(
+                model=args.mapper_model or cfg.rsi_mapper_model,
+                openai_api_key=key,
+                openai_api_base="https://openrouter.ai/api/v1",
+                temperature=0.2,
+            )
+
+    artifact = args.artifact or os.path.join("artifacts", f"rsi_{args.title}.md")
 
     async def _run():
         return await run_rsi(
@@ -258,16 +292,21 @@ def cmd_rsi(args: argparse.Namespace) -> int:
             law_title=args.title,
             artifact_path=artifact,
             log=_print_log if args.verbose else None,
+            mapper_llm=mapper,
         )
 
-    result = asyncio.run(_run())
+    try:
+        result = asyncio.run(_run())
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 2
     text = result.get("proposed_solution") or result
     print(text if isinstance(text, str) else json.dumps(text, indent=2))
     if args.json_out:
         with open(args.json_out, "w", encoding="utf-8") as f:
-            json.dump(result, f, indent=2, ensure_ascii=False)
+            json.dump(result, f, indent=2, ensure_ascii=False, default=str)
         print(f"Wrote {args.json_out}", file=sys.stderr)
-    return 0
+    return 1 if result.get("error") else 0
 
 
 def _add_provider_args(p: argparse.ArgumentParser) -> None:
@@ -346,33 +385,65 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_rsi = sub.add_parser(
         "rsi",
-        help="Run RSI (recursive self-improvement) over a formal artifact",
+        help="Run the RSI security loop over a policy (findings + hardened policy)",
     )
     p_rsi.add_argument(
-        "--input",
-        "-i",
-        required=True,
-        help="Path to a formal artifact (.txt/.md/.tex/.pdf)",
+        "--input", "-i", required=True, help="Security policy, runbook or standard (.txt/.md)"
     )
-    p_rsi.add_argument("--title", default="rsi-artifact", help="Law / artifact title")
-    p_rsi.add_argument("--iterations", type=int, default=None, help="RSI cycles")
+    p_rsi.add_argument("--title", default="policy", help="Policy title")
     p_rsi.add_argument(
-        "--mutators",
-        type=int,
+        "--iterations", type=int, default=None, help="Loops (correspond, tick, heal, stock, lora)"
+    )
+    p_rsi.add_argument(
+        "--drive",
+        choices=("leak", "stock", "bal"),
+        default="bal",
+        help="leak = defensive, stock = evolving",
+    )
+    p_rsi.add_argument(
+        "--lambda-am", type=float, default=0.7, help="Sensitivity to Agent Mechanics (0..1)"
+    )
+    p_rsi.add_argument("--ticks", type=int, default=3, help="Tick-law steps per loop")
+    p_rsi.add_argument(
+        "--objective", default="", help="Security objective that guides findings and controls"
+    )
+    p_rsi.add_argument(
+        "--mutators", type=int, default=None, help="Cap on control-operation agents (0 = none)"
+    )
+    p_rsi.add_argument(
+        "--artifact", default="", help="Report path (default artifacts/rsi_<title>.md)"
+    )
+    p_rsi.add_argument(
+        "--offline", action="store_true", help="Deterministic offline heuristics (no model calls)"
+    )
+    p_rsi.add_argument("--debug", action="store_true", help="Alias of --offline")
+    p_rsi.add_argument(
+        "--driver-url",
         default=None,
-        help="Gen-0 swarm size (0 = no-mutation baseline)",
+        help="Local llama.cpp server for the driver (default: settings)",
+    )
+    p_rsi.add_argument("--driver-model", default=None, help="Driver model name on the local server")
+    p_rsi.add_argument(
+        "--mapper-model", default=None, help="OpenRouter mapper model (recommended ARC-AGI-2 > 70)"
     )
     p_rsi.add_argument(
-        "--artifact",
-        default="",
-        help="Output artifact path (default artifacts/artifact_rsi_<title>.py)",
+        "--mapper-arc-agi2", type=float, default=None, help="Declared ARC-AGI-2 score of the mapper"
     )
     p_rsi.add_argument(
-        "--offline",
+        "--api-key", default=None, help="OpenRouter key for the mapper (or OPENROUTER_API_KEY)"
+    )
+    p_rsi.add_argument(
+        "--lora",
         action="store_true",
-        help="Force deterministic offline heuristics (no API calls)",
+        help="Clamp a LoRA adapter on the llama.cpp driver when the loop improves",
     )
-    _add_provider_args(p_rsi)
+    p_rsi.add_argument(
+        "--lora-adapter-id", type=int, default=0, help="Adapter id loaded on the llama.cpp server"
+    )
+    p_rsi.add_argument("--lora-clamp-max", type=float, default=1.0, help="Maximum adapter scale")
+    p_rsi.add_argument("--json-out", default=None, help="Write the full result JSON here")
+    p_rsi.add_argument("--yes", action="store_true", help="Allow large runs")
+    p_rsi.add_argument("-v", "--verbose", action="store_true", help="Print pipeline logs to stderr")
     p_rsi.set_defaults(func=cmd_rsi)
 
     p_est = sub.add_parser("estimate", help="Print LLM-call estimate (no network)")

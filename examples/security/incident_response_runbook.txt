@@ -1,0 +1,17 @@
+INCIDENT RESPONSE RUNBOOK (illustrative; contains deliberate coverage gaps)
+
+SCOPE
+1. Purpose: restore service after a security incident affecting customer-facing systems. This runbook applies to the operations team.
+
+RESPONSE
+2. The on-call engineer must execute the containment playbook within 30 minutes of a confirmed incident.
+3. Affected hosts shall be patched and rebuilt from golden images before they return to production.
+4. The incident commander must produce a timeline and a remediation report within 5 working days.
+5. Compromised credentials must be revoked and reissued.
+
+RECOVERY
+6. Backups of customer databases are restored from the most recent clean snapshot.
+7. Service owners verify restored data against checksums before reopening traffic.
+
+ASSETS
+8. Systems in scope: payment API servers, customer database cluster, load balancers, the build pipeline.

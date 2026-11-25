@@ -1,26 +1,33 @@
 /**
- * RsiMode — controller for the "♾️ RSI Loop" tab.
+ * RsiMode: controller for the "♾️ RSI Loop" tab (cybersecurity).
  *
  * Starts runs via POST /start_rsi, receives `RSI_EVENT:` lines from the shared
  * /stream_log SSE feed (routed here by index.html), and keeps the Ouroboros
- * Lattice canvas, stage rail, instrument cards, and result panes in sync.
+ * Lattice, the stage rail, the instrument cards and the result panes in sync.
  */
 const RsiMode = (() => {
     'use strict';
 
     const $ = id => document.getElementById(id);
     const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-    const LEVEL_COLORS = ['#8b5cf6', '#6d74f4', '#3b82f6', '#2196e0', '#06b6d4'];
+    const FUNCTION = {
+        Ni: 'threat forecasting', Ne: 'red-team testing', Si: 'audit logging', Se: 'monitoring & alerting',
+        Ti: 'access rules', Te: 'incident response', Fi: 'identity & least privilege', Fe: 'coordination & rollout',
+    };
+    // Drive presets mirror deepthink/nomosloop/world.py DRIVES.
+    const PRESETS = {
+        leak: { s_min: 0.62, zeta: 0.3, theta_p: 0.2, q: 0.03 },
+        bal: { s_min: 0.5, zeta: 0.15, theta_p: 0.3, q: 0.02 },
+        stock: { s_min: 0.38, zeta: 0.08, theta_p: 0.45, q: 0.01 },
+    };
+    const SLIDERS = ['s_min', 'zeta', 'theta_p', 'q', 'r_scale'];
 
     let active = false;
-    let artifactCode = '';
-    let artifactName = 'rsi_artifact.py';
+    let report = '';
+    let reportName = 'rsi_report.md';
     let loopLog = [];
-
-    function levelColor(i, n) {
-        if (n <= 1) return LEVEL_COLORS[0];
-        return LEVEL_COLORS[Math.round(i / (n - 1) * (LEVEL_COLORS.length - 1))];
-    }
+    let drive = 'bal';
+    let touched = new Set();
 
     function setStatus(text, type) {
         const el = $('rsi-status');
@@ -29,108 +36,180 @@ const RsiMode = (() => {
         if (typeof setAppStatus === 'function') setAppStatus(el, type);
     }
 
+    // ── drive + sensitivity ──────────────────────────────────────────────
+    function setDrive(d) {
+        drive = d;
+        document.querySelectorAll('[data-rsi-drive]').forEach(b => b.classList.toggle('active', b.dataset.rsiDrive === d));
+        const preset = PRESETS[d];
+        Object.entries(preset).forEach(([k, v]) => {
+            if (touched.has(k)) return;
+            const el = $(`rsi-s-${k}`);
+            if (el) { el.value = v; showSlider(k); }
+        });
+        const hint = $('rsi-drive-hint');
+        if (hint) {
+            hint.textContent = {
+                leak: 'Defensive: agents that leak heal first. Expect many findings and few new controls.',
+                bal: 'Balanced: heal what leaks, evolve where there is surplus.',
+                stock: 'Evolving: agents with surplus write controls. Expect posture to rise and fewer findings.',
+            }[d];
+        }
+    }
+
+    function showSlider(k) {
+        const el = $(`rsi-s-${k}`), out = $(`rsi-s-${k}-v`);
+        if (el && out) out.textContent = Number(el.value).toFixed(k === 'q' ? 3 : 2);
+    }
+
+    function sensitivity() {
+        const out = {};
+        SLIDERS.forEach(k => {
+            const el = $(`rsi-s-${k}`);
+            if (el && (touched.has(k) || k in PRESETS[drive])) out[k] = parseFloat(el.value);
+        });
+        return out;
+    }
+
     // ── stage rail ───────────────────────────────────────────────────────
     function buildRail() {
         const rail = $('rsi-rail');
         if (!rail) return;
-        const parts = RsiLattice.STAGES.map((name, i) => {
+        rail.innerHTML = RsiLattice.STAGES.map((name, i) => {
             const sep = i === 0 ? '' : (i === 2 ? '<span class="rsi-rail__sep">⟶</span>' : '<span class="rsi-rail__sep">·</span>');
             return `${sep}<span class="rsi-rail__step" data-stage="${name}">${RsiLattice.STAGE_META[name].label}</span>`;
-        });
-        rail.innerHTML = parts.join('') + '<span class="rsi-rail__loopback" title="rectify routes back to mutate while loops remain">↺</span>';
+        }).join('') + '<span class="rsi-rail__loopback" title="lora routes back to correspond while loops remain">↺</span>';
     }
 
     function markStage(name) {
         document.querySelectorAll('.rsi-rail__step').forEach(el => {
-            const isActive = el.dataset.stage === name;
-            if (el.classList.contains('is-active') && !isActive) el.classList.add('is-done');
-            el.classList.toggle('is-active', isActive);
+            const on = el.dataset.stage === name;
+            if (el.classList.contains('is-active') && !on) el.classList.add('is-done');
+            el.classList.toggle('is-active', on);
         });
     }
 
     // ── instrument cards ─────────────────────────────────────────────────
-    function renderCapacity(st) {
-        const caps = (st && st.capacity) || [];
-        const box = $('rsi-capacity');
-        if (!box || !caps.length) return;
-        const last = caps[caps.length - 1];
-        const base = st.baseline_capacity || caps[0].capacity;
-        const delta = last.capacity - base;
-        $('rsi-cap-instances').textContent = `${last.instances} instances`;
-
-        const w = 260, h = 70, pad = 6;
-        const vals = caps.map(c => c.capacity);
-        const lo = Math.min(...vals, base) - 0.05, hi = Math.max(...vals, base) + 0.05;
-        const x = i => pad + (caps.length === 1 ? (w - 2 * pad) / 2 : i * (w - 2 * pad) / (caps.length - 1));
+    function renderPosture(st) {
+        const post = (st && st.posture) || [];
+        const box = $('rsi-posture');
+        if (!box || !post.length) return;
+        const last = post[post.length - 1], first = post[0];
+        const delta = last.score - first.score;
+        $('rsi-posture-version').textContent = `${post.length} version${post.length === 1 ? '' : 's'}`;
+        const w = 260, h = 64, pad = 6;
+        const vals = post.map(p => p.score);
+        const lo = Math.min(...vals) - 0.02, hi = Math.max(...vals) + 0.02;
+        const x = i => pad + (post.length === 1 ? (w - 2 * pad) / 2 : i * (w - 2 * pad) / (post.length - 1));
         const y = v => h - pad - (v - lo) / (hi - lo || 1) * (h - 2 * pad);
-        // step line: capacity holds until the next elevation
         let d = `M ${x(0)} ${y(vals[0])}`;
         for (let i = 1; i < vals.length; i++) d += ` H ${x(i)} V ${y(vals[i])}`;
-        const area = `${d} V ${h} H ${x(0)} Z`;
-        const dots = caps.map((c, i) =>
-            `<circle cx="${x(i)}" cy="${y(c.capacity)}" r="${i === caps.length - 1 ? 3 : 1.8}" fill="${i === caps.length - 1 ? '#fff' : '#8b5cf6'}"><title>${esc(c.version)} · ${c.capacity.toFixed(3)} · ${esc(c.source)}</title></circle>`
-        ).join('');
+        const missing = (last.missing || []).map(s => `<span class="rsi-chip-mini" title="${esc(FUNCTION[s])}">${s}</span>`).join('') || '<span class="rsi-empty">none</span>';
         box.innerHTML = `
-            <div><span class="rsi-capacity__value">${last.capacity.toFixed(3)}</span>
+            <div><span class="rsi-capacity__value">${Number(last.score).toFixed(3)}</span>
             <span class="rsi-capacity__delta ${delta > 1e-9 ? 'is-up' : 'is-flat'}">${delta > 1e-9 ? '▲ +' + delta.toFixed(3) : '— baseline'}</span></div>
-            <div class="rsi-capacity__meta">baseline ${base.toFixed(3)} · coverage ${(last.coverage * 100).toFixed(0)}% · ${caps.length} version${caps.length === 1 ? '' : 's'}</div>
-            <svg class="rsi-spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Capacity per lattice version">
+            <div class="rsi-capacity__meta">diversity ${Number(last.diversity).toFixed(2)} · ${last.contradictions} contradictory pair${last.contradictions === 1 ? '' : 's'}</div>
+            <svg class="rsi-spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="Posture per policy version">
                 <defs><linearGradient id="rsi-spark-fill" x1="0" x2="0" y1="0" y2="1">
-                    <stop offset="0" stop-color="#8b5cf6" stop-opacity="0.35"/><stop offset="1" stop-color="#8b5cf6" stop-opacity="0"/>
+                    <stop offset="0" stop-color="#34d399" stop-opacity="0.3"/><stop offset="1" stop-color="#34d399" stop-opacity="0"/>
                 </linearGradient></defs>
-                <line x1="0" x2="${w}" y1="${y(base)}" y2="${y(base)}" stroke="rgba(255,255,255,0.18)" stroke-dasharray="3 4"/>
-                <path d="${area}" fill="url(#rsi-spark-fill)"/>
-                <path d="${d}" fill="none" stroke="#8b5cf6" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
-                ${dots}
-            </svg>`;
+                <path d="${d} V ${h} H ${x(0)} Z" fill="url(#rsi-spark-fill)"/>
+                <path d="${d}" fill="none" stroke="#34d399" stroke-width="1.5" vector-effect="non-scaling-stroke"/>
+            </svg>
+            <div class="rsi-capacity__meta">missing functions: ${missing}</div>`;
     }
 
-    function renderLevels(st) {
-        const lat = st && st.lattice;
-        const box = $('rsi-levels');
-        if (!box || !lat || !(lat.levels || []).length) return;
-        $('rsi-lattice-version').textContent = lat.version || '';
-        const n = lat.levels.length;
-        box.innerHTML = lat.levels.map((lv, i) => `
-            <div class="rsi-level" style="--lvl:${levelColor(i, n)}">
-                <span class="rsi-level__id">${esc(lv.id)}</span>
-                <span class="rsi-level__name" title="${esc(lv.name)}">${esc(lv.name)} · ${lv.rules.length} rule${lv.rules.length === 1 ? '' : 's'}</span>
-                ${lv.base ? `<span class="rsi-level__meta"><b>base</b> ${esc(lv.base)}</span>` : ''}
-                ${lv.modulus ? `<span class="rsi-level__meta"><b>mod</b> ${esc(lv.modulus)}</span>` : ''}
-            </div>`).join('');
+    function renderFunctions(st) {
+        const post = (st && st.posture) || [];
+        const box = $('rsi-functions');
+        if (!box || !post.length || !post[post.length - 1].functions) return;
+        const f = post[post.length - 1].functions;
+        const max = Math.max(...Object.values(f), 0.01);
+        box.innerHTML = Object.entries(f).map(([sp, share]) => {
+            const c = (RsiLattice.SPECIES_COL[sp] || [255, 255, 255]).join(',');
+            return `<div class="rsi-fn" title="${esc(sp)}: ${esc(FUNCTION[sp])}">
+                <span class="rsi-fn__sp" style="color:rgb(${c})">${sp}</span>
+                <span class="rsi-fn__name">${esc(FUNCTION[sp])}</span>
+                <span class="rsi-fn__bar"><i style="width:${(share / max * 100).toFixed(1)}%;background:rgb(${c})"></i></span>
+                <span class="rsi-fn__val">${(share * 100).toFixed(0)}%</span></div>`;
+        }).join('');
     }
 
-    function renderSwarm(st) {
-        const props = (st && st.proposals) || [];
-        const box = $('rsi-swarm');
-        if (!box || !props.length) return;
-        const acc = props.filter(p => p.status === 'accepted').length;
-        $('rsi-swarm-count').textContent = `${acc} / ${props.length} accepted`;
-        box.innerHTML = props.slice().reverse().map(p => `
-            <div class="rsi-prop rsi-prop--${esc(p.status)}" title="${esc(p.id)} · ${esc(p.author)}">
-                <span class="rsi-prop__mark"></span>
-                <span class="rsi-prop__op">${esc(p.op)} <small>@${esc(p.level)}</small></span>
-                <span class="rsi-prop__score">${p.score == null ? '…' : Number(p.score).toFixed(2)}</span>
-            </div>`).join('');
+    function renderAgents(st) {
+        const box = $('rsi-agents');
+        if (!box || !st || !Array.isArray(st.agents)) return;
+        const by = { leak: 0, stock: 0, idle: 0 };
+        const ranks = {};
+        st.agents.forEach(a => { by[a.state] = (by[a.state] || 0) + 1; ranks[a.rank] = (ranks[a.rank] || 0) + 1; });
+        $('rsi-agents-count').textContent = `${st.agents.length} agents`;
+        const ens = (st.ensembles || []).slice(0, 4).map(e =>
+            `<details class="rsi-ens"><summary><b>${esc(e.title)}</b> · ${e.members.length} members · ${esc(e.climate)} · L ${e.L}</summary><pre>${esc(e.text)}</pre></details>`).join('');
+        box.innerHTML = `
+            <div class="rsi-states">
+                <span class="rsi-state rsi-state--leak">${by.leak} leaking</span>
+                <span class="rsi-state rsi-state--stock">${by.stock} stocking</span>
+                <span class="rsi-state">${by.idle} idle</span>
+            </div>
+            <div class="rsi-capacity__meta">${['Attr', 'Cyc', 'Res', 'Seed', 'Inr'].filter(r => ranks[r]).map(r => `${ranks[r]} ${r}`).join(' · ')} · rounds/solve ${st.rounds_per_solve ?? '—'}</div>
+            ${ens || '<span class="rsi-empty">No ensemble yet: agents cluster on stems and duals.</span>'}`;
+    }
+
+    function renderLists(st) {
+        if (!st) return;
+        const fbox = $('rsi-findings');
+        const ins = (st.inspections || []).slice().sort((a, b) => (b.severity || 0) - (a.severity || 0));
+        $('rsi-tab-findings-n').textContent = ins.length ? ` ${ins.length}` : '';
+        if (fbox) {
+            fbox.innerHTML = ins.length ? ins.map(f => `
+                <div class="rsi-finding">
+                    <div class="rsi-finding__head"><span class="rsi-sev" style="--sev:${Math.min(1, f.severity || 0)}">${Number(f.severity || 0).toFixed(2)}</span>
+                    <b>${esc(f.agent)}</b> heal <code>${esc(f.op)}</code> · ${esc(f.cause)} on ${esc(f.species)} · Leak ${f.leak_before} → ${f.leak_after}${f.memory ? ' · <span title="reused from distilled memory">recalled</span>' : ''}</div>
+                    ${(f.clashes || []).map(c => `<div class="rsi-clash"><code>${esc(c.a1)}</code> × <code>${esc(c.a2)}</code> <span>f=${Number(c.f).toFixed(2)}</span></div>`).join('')}
+                    <p>${esc(f.finding)}</p>
+                </div>`).join('') : '<span class="rsi-empty">No agent leaked enough to need healing.</span>';
+        }
+        const cbox = $('rsi-controls');
+        const ctrls = st.controls || [];
+        $('rsi-tab-controls-n').textContent = ctrls.length ? ` ${ctrls.length}` : '';
+        if (cbox) {
+            cbox.innerHTML = ctrls.length ? ctrls.slice().reverse().map(c => {
+                const col = (RsiLattice.SPECIES_COL[c.function] || [255, 255, 255]).join(',');
+                return `<div class="rsi-control"><span class="rsi-control__id">${esc(c.id)}</span>
+                    <span class="rsi-control__fn" style="color:rgb(${col})">${esc(c.function)} · ${esc(FUNCTION[c.function])}</span>
+                    <p>${esc(c.text)}</p>
+                    <span class="rsi-capacity__meta">by ${esc(c.agent)} via <code>${esc(c.op)}</code> on <code>${esc(c.clause)}</code> · posture ${Number(c.posture_before).toFixed(3)} → ${Number(c.posture_after).toFixed(3)}</span></div>`;
+            }).join('') : '<span class="rsi-empty">No control improved the measured posture yet.</span>';
+        }
+        const tbox = $('rsi-toc');
+        if (tbox && st.toc) {
+            tbox.innerHTML = `<table class="rsi-table"><thead><tr><th>TC</th><th>Artifact</th><th>Agent</th><th>Species projection</th><th>A</th><th>conf</th><th>mapper</th></tr></thead><tbody>${
+                st.toc.slice(0, 200).map(r => `<tr><td>${r.n}</td><td><code>${esc(r.ax)}</code></td><td>${esc(r.agent)}</td><td>${Object.entries(r.p).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} ${v.toFixed(2)}`).join(', ')}</td><td>${Number(r.A).toFixed(2)}</td><td>${Number(r.conf).toFixed(2)}</td><td>${esc(r.mapper)}</td></tr>`).join('')
+            }</tbody></table>`;
+        }
+        const lbox = $('rsi-lora');
+        if (lbox && st.lora) {
+            const L = st.lora;
+            lbox.innerHTML = `<div class="rsi-capacity__meta">examples ${L.examples || 0} · scale ${Number(L.scale || 0).toFixed(2)} (last good ${Number(L.good_scale || 0).toFixed(2)}) · trained ${L.trained || 0}×</div>
+                ${(L.history || []).map(h => `<div class="rsi-lora-row"><code>t=${h.t}</code> <b>${esc(h.decision)}</b> scale → ${Number(h.clamp?.scale ?? 0).toFixed(2)} · pushed ${h.clamp?.pushed ? 'yes' : 'no'}${h.clamp?.reason ? ` (${esc(h.clamp.reason)})` : ''} · rounds/solve ${h.metric?.rounds_per_solve} · leak ${h.metric?.leak} · posture ${h.metric?.capacity}</div>`).join('')}`;
+        }
     }
 
     function pushLoopLog(ev) {
         if (!ev || ev.phase !== 'exit') return;
-        const loopNo = ev.node === 'rectify' ? ev.iteration : ev.iteration + 1;
-        loopLog.push({ cls: 'is-node', text: `▸ ${ev.node}  (loop ${loopNo})` });
-        (ev.log || []).forEach(line => {
-            const cls = /^elevated/.test(line) ? 'is-elevate' : (/rolled back|rollback/.test(line) ? 'is-rollback' : '');
-            loopLog.push({ cls, text: '   ' + line });
-        });
+        (ev.log || []).forEach(line => loopLog.push({ cls: 'is-node', text: `▸ ${line}` }));
         const box = $('rsi-looplog');
+        const events = (ev.state && ev.state.events) || [];
         if (box) {
-            box.innerHTML = loopLog.map(l => `<div class="${l.cls}">${esc(l.text)}</div>`).join('');
+            const evLines = events.slice(-40).map(e => {
+                const cls = e.kind === 'leak' || e.kind === 'clash' ? 'is-rollback' : e.kind === 'stock' ? 'is-elevate' : '';
+                return `<div class="${cls}">${esc(e.text)}</div>`;
+            }).join('');
+            box.innerHTML = loopLog.map(l => `<div class="${l.cls}">${esc(l.text)}</div>`).join('') + '<div class="rsi-looplog__sep">— recent NX-1 events —</div>' + evLines;
             box.scrollTop = box.scrollHeight;
         }
     }
 
     function onState(st, ev) {
-        if (st) { renderCapacity(st); renderLevels(st); renderSwarm(st); }
+        if (st) { renderPosture(st); renderFunctions(st); renderAgents(st); renderLists(st); }
         if (ev && ev.type === 'complete') { markStage(null); return; }
         pushLoopLog(ev);
     }
@@ -142,31 +221,26 @@ const RsiMode = (() => {
     }
 
     function renderResult(result) {
-        const box = $('rsi-results');
-        if (!box) return;
-        box.classList.remove('hidden');
+        $('rsi-results').classList.remove('hidden');
         if (result.error) {
-            $('rsi-summary').innerHTML = `<p style="color: var(--app-accent-danger)">RSI run failed: ${esc(result.error)}</p>`;
-            showPane('summary');
+            $('rsi-report').innerHTML = `<p style="color: var(--app-accent-danger)">RSI run failed: ${esc(result.error)}</p>`;
+            showPane('report');
             return;
         }
-        const md = result.proposed_solution || '';
-        $('rsi-summary').innerHTML = (window.marked && marked.parse) ? marked.parse(md) : `<pre>${esc(md)}</pre>`;
-        artifactCode = result.artifact_code || '';
-        artifactName = (result.artifact_path || 'rsi_artifact.py').split(/[\\/]/).pop();
-        const code = $('rsi-artifact-code');
-        code.textContent = artifactCode;
-        if (window.Prism && Prism.highlightElement) Prism.highlightElement(code);
-        $('rsi-download-btn').disabled = !artifactCode;
-        showPane('summary');
+        report = result.artifact_code || '';
+        reportName = (result.artifact_path || 'rsi_report.md').split(/[\\/]/).pop();
+        $('rsi-report').innerHTML = (window.marked && marked.parse) ? marked.parse(report) : `<pre>${esc(report)}</pre>`;
+        $('rsi-download-btn').disabled = !report;
+        if (result.snapshot) renderLists(result.snapshot);
+        showPane((result.findings || []).length ? 'findings' : 'controls');
     }
 
     function download() {
-        if (!artifactCode) return;
-        const blob = new Blob([artifactCode], { type: 'text/x-python;charset=utf-8' });
+        if (!report) return;
+        const blob = new Blob([report], { type: 'text/markdown;charset=utf-8' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        a.href = url; a.download = artifactName;
+        a.href = url; a.download = reportName;
         document.body.appendChild(a); a.click(); a.remove();
         URL.revokeObjectURL(url);
     }
@@ -181,32 +255,39 @@ const RsiMode = (() => {
     async function start(e) {
         e.preventDefault();
         const text = $('rsi-text').value;
-        if (!text.trim()) { setStatus('Paste a formal artifact first.', 'warn'); return; }
+        if (!text.trim()) { setStatus('Paste a security policy first.', 'warn'); return; }
         const val = id => ($(id) ? $(id).value.trim() : '');
+        const num = (id, d) => { const v = parseFloat(val(id)); return Number.isFinite(v) ? v : d; };
         const payload = {
             text,
-            law_title: val('rsi-title') || 'rsi-artifact',
-            iterations: parseInt(val('rsi-iterations'), 10) || 2,
-            mutators: parseInt(val('rsi-mutators'), 10),
+            law_title: val('rsi-title') || 'policy',
+            objective: val('rsi-objective'),
+            drive,
+            iterations: Math.round(num('rsi-iterations', 2)),
+            ticks: Math.round(num('rsi-ticks', 3)),
+            mutators: Math.round(num('rsi-mutators', 8)),
+            lambda_am: num('rsi-lambda', 0.7),
+            sensitivity: sensitivity(),
             offline: $('rsi-offline').checked,
-            provider: val('llm-provider') || 'openrouter',
-            api_key: val('openrouter-api-key'),
-            openrouter_model: val('openrouter-model'),
             llamacpp_url: val('llamacpp-url'),
             llamacpp_model: val('llamacpp-model'),
-            synthesis_model: val('synthesis-model'),
+            api_key: val('openrouter-api-key'),
+            mapper_model: val('rsi-mapper-model'),
+            mapper_arc_agi2: val('rsi-mapper-arc'),
+            lora: {
+                enabled: $('rsi-lora-on').checked,
+                adapter_id: Math.round(num('rsi-lora-id', 0)),
+                clamp_max: num('rsi-lora-max', 1.0),
+            },
         };
-        if (Number.isNaN(payload.mutators)) payload.mutators = 6;
-
         loopLog = [];
         $('rsi-looplog').innerHTML = '';
         $('rsi-results').classList.add('hidden');
         document.querySelectorAll('.rsi-rail__step').forEach(el => el.classList.remove('is-active', 'is-done'));
         RsiLattice.reset();
         setRunning(true);
-        setStatus(payload.offline ? 'Running offline engine…' : `Running with ${payload.provider}…`);
-        if (typeof addLogMessage === 'function') addLogMessage(`--- ♾️ RSI loop starting (${payload.iterations} loops, ${payload.mutators} mutators, offline=${payload.offline}) ---`, { color: 'cyan' });
-
+        setStatus(payload.offline ? 'Running offline engine…' : 'Running on the local driver…');
+        if (typeof addLogMessage === 'function') addLogMessage(`--- ♾️ RSI security loop (${drive}, ${payload.iterations} loops, λ_AM ${payload.lambda_am}, offline=${payload.offline}) ---`, { color: 'cyan' });
         try {
             const resp = await fetch('/start_rsi', {
                 method: 'POST',
@@ -215,7 +296,7 @@ const RsiMode = (() => {
             });
             const data = await resp.json().catch(() => ({}));
             if (!resp.ok) throw new Error(data.message || `HTTP ${resp.status}`);
-            setStatus(`Looping “${data.law_title}”`, null);
+            setStatus(`Looping “${data.law_title}” · mapper: ${data.mapper}`, null);
         } catch (err) {
             setRunning(false);
             RsiLattice.stop();
@@ -232,13 +313,12 @@ const RsiMode = (() => {
         } else if (data.type === 'rsi_complete') {
             const result = data.result || {};
             RsiLattice.complete(result.snapshot || null);
-            // results land after the replay queue drains so the loop finishes first
             const wait = () => {
                 if (RsiLattice.isRunning()) { setTimeout(wait, 200); return; }
                 setRunning(false);
                 renderResult(result);
                 if (result.error) setStatus('Run failed.', 'error');
-                else setStatus(`Converged · ${result.lattice_version} · capacity ${Number(result.baseline_capacity).toFixed(3)} → ${Number(result.final_capacity).toFixed(3)}`, 'success');
+                else setStatus(`Done · ${result.findings.length} findings · ${result.controls.length} controls · posture ${Number(result.posture_baseline).toFixed(3)} → ${Number(result.posture_final).toFixed(3)}`, 'success');
             };
             wait();
         }
@@ -249,19 +329,19 @@ const RsiMode = (() => {
         const box = $('rsi-examples');
         if (!box) return;
         try {
-            const resp = await fetch('/rsi_examples');
-            const data = await resp.json();
+            const data = await (await fetch('/rsi_examples')).json();
             (data.examples || []).forEach((ex, i) => {
                 const b = document.createElement('button');
                 b.type = 'button';
                 b.className = 'rsi-chip';
-                b.textContent = ex.name.replace(/\.(txt|md)$/, '');
+                b.textContent = ex.name.replace(/\.(txt|md)$/, '').replace(/_/g, ' ');
                 b.addEventListener('click', () => {
                     $('rsi-text').value = ex.text;
-                    $('rsi-title').value = b.textContent.replace(/_fragment$/, '');
+                    $('rsi-title').value = ex.name.replace(/\.(txt|md)$/, '');
                 });
                 box.appendChild(b);
-                if (i === 0 && !$('rsi-text').value) b.click();
+                if (ex.name.startsWith('institution') && !$('rsi-text').value) b.click();
+                if (i === (data.examples.length - 1) && !$('rsi-text').value) box.querySelector('.rsi-chip')?.click();
             });
             if (!(data.examples || []).length) box.classList.add('hidden');
         } catch (e) {
@@ -276,6 +356,20 @@ const RsiMode = (() => {
         $('rsi-form').addEventListener('submit', start);
         $('rsi-download-btn').addEventListener('click', download);
         document.querySelectorAll('[data-rsi-pane]').forEach(b => b.addEventListener('click', () => showPane(b.dataset.rsiPane)));
+        document.querySelectorAll('[data-rsi-drive]').forEach(b => b.addEventListener('click', () => setDrive(b.dataset.rsiDrive)));
+        SLIDERS.forEach(k => {
+            const el = $(`rsi-s-${k}`);
+            if (!el) return;
+            el.addEventListener('input', () => { touched.add(k); showSlider(k); });
+            showSlider(k);
+        });
+        const lam = $('rsi-lambda');
+        if (lam) {
+            const show = () => { $('rsi-lambda-v').textContent = Number(lam.value).toFixed(2); };
+            lam.addEventListener('input', show);
+            show();
+        }
+        $('rsi-reset-sens')?.addEventListener('click', () => { touched = new Set(); setDrive(drive); $('rsi-s-r_scale').value = 0.1; showSlider('r_scale'); });
         $('rsi-file-input').addEventListener('change', ev => {
             const f = ev.target.files && ev.target.files[0];
             if (!f) return;
@@ -288,6 +382,7 @@ const RsiMode = (() => {
             reader.readAsText(f);
             ev.target.value = '';
         });
+        setDrive('bal');
         loadExamples();
     }
 

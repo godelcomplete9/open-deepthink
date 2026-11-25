@@ -1,45 +1,55 @@
 """
-RSI — recursive self-improvement over formal artifacts.
+RSI: recursive self-improvement for cybersecurity.
 
-The fourth open-deepthink section. A *law* is any generative formal system that
-produces lesser replicas of itself (instantiations): a physics theory, a legal
-code, a math model, a code repository, a documentation set. A *scale* (or
-*base*) is a layered rewrite grammar that lets one compact high-level statement
-expand into many consistent low-level instances — the way binary encodes
-decimal, or a zodiac encodes individual charts.
+The fourth open-deepthink section. The artifact is an institution's security
+policy, read as a *law*: a generative formal system whose clauses expand from
+principles into policies, controls and assets. The loop runs on **Agent
+Mechanics** (the treatise in ``docs/``, with the NX-1 nomenclature complement
+in ``docs/NOMENCLATURE_COMPLEMENT.md``):
 
-The engine recovers those scales from raw text, exposes them as mutable state,
-and evolves them so each generation spawns **more world per symbol** (higher
-instantiation capacity).
+* every clause, modulus and viable control operation becomes an agent,
+  through a table of correspondences built by a mapper model;
+* the agents tick under the treatise's tick law. Their clashes, ensembles
+  and ranks are written in the NX-1 nomenclature;
+* **Leak** (defensive): a leaking agent heals in the lattice with a licensed
+  operator. The heal is pulled back through the symbolic gauge coderivative
+  into an inspection finding;
+* **Stock** (evolving): an agent with a surplus proposes a control clause,
+  kept only when the measured posture improves;
+* a **LoRA** loop distils the traces and clamps the adapter into the local
+  driver model when the loop improves.
 
 Public library entry::
 
-    from deepthink.rsi import run_rsi_pipeline, default_rsi_params
+    from deepthink.nomosloop import run_rsi_pipeline, default_rsi_params
     # or: from deepthink import run_rsi
 
-    result = await run_rsi_pipeline(llm, formal_text, iterations=2)
-
-Library + CLI + web UI (the "RSI Loop" tab streams live node events via
-``run_rsi_pipeline(on_event=...)``).
+    result = await run_rsi_pipeline(local_llm, policy_text, iterations=2,
+                                    params={"drive": "leak"})
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-# Load .env BEFORE importing .graph, whose module-level constants
-# (NOMOSLOOP_MUTATORS, NOMOSLOOP_ACCEPT, spawn budgets) read os.environ.
-from .routing import ROUTING_POLICY, call_llm, clear_llm_bridge, load_dotenv, route, set_llm_bridge
+from .routing import (
+    ROUTING_POLICY,
+    call_llm,
+    clear_llm_bridge,
+    is_local_llm,
+    load_dotenv,
+    route,
+    set_llm_bridge,
+    set_tier_bridge,
+)
 from .state import (
     LATTICE_VERSION,
-    InhabitantRecord,
-    InstantiationRecord,
     Motif,
-    MutationProposal,
     NomosState,
     ScaleLattice,
     ScaleLevel,
     ScaleRule,
+    hash_text,
     new_run_state,
 )
 
@@ -48,18 +58,9 @@ _repo_env = Path(__file__).resolve().parents[2] / ".env"
 if _repo_env.is_file():
     load_dotenv(str(_repo_env))
 
-from .graph import (  # noqa: E402  (import after load_dotenv by design)
-    TOPOLOGY,
-    build_graph,
-    describe_topology,
-    mutate_topology,
-    run_pipeline,
-    set_observer,
-    set_topology,
-)
-from .mesh import MeshWorld  # noqa: E402
-from .pipeline import default_rsi_params, run_rsi_pipeline, snapshot_state  # noqa: E402
-from .state import hash_text  # noqa: E402
+from .graph import TOPOLOGY, build_graph, describe_topology, run_pipeline, set_observer  # noqa: E402
+from .pipeline import DRIVES, default_rsi_params, run_rsi_pipeline, snapshot_state  # noqa: E402
+from .world import World, drive_config  # noqa: E402
 
 __all__ = [
     # State
@@ -68,9 +69,6 @@ __all__ = [
     "ScaleLevel",
     "ScaleLattice",
     "Motif",
-    "MutationProposal",
-    "InstantiationRecord",
-    "InhabitantRecord",
     "LATTICE_VERSION",
     "new_run_state",
     "hash_text",
@@ -80,18 +78,20 @@ __all__ = [
     "load_dotenv",
     "ROUTING_POLICY",
     "set_llm_bridge",
+    "set_tier_bridge",
     "clear_llm_bridge",
+    "is_local_llm",
     # Engine
-    "MeshWorld",
+    "World",
+    "drive_config",
+    "DRIVES",
     "build_graph",
     "run_pipeline",
     "TOPOLOGY",
     "describe_topology",
-    "mutate_topology",
-    "set_topology",
+    "set_observer",
     # Pipeline / API
     "run_rsi_pipeline",
     "default_rsi_params",
     "snapshot_state",
-    "set_observer",
 ]

@@ -1,26 +1,32 @@
-"""LangGraph orchestration substrate for the RSI engine. Every
-node/edge/state is explicit, inspectable, and RSI-mutable (see TOPOLOGY +
-mutate_topology).
+"""LangGraph orchestration of the RSI loop for cybersecurity: Leak and stock.
+
+The artifact is an institution's security policy. Agent Mechanics agents
+stand for its clauses, the moduli that close each level, and every viable
+control operation. The loop alternates between two balances:
+
+* **Leak (defensive).** An agent whose arriving current is not stored (its
+  clauses clash, or its function is mis-mapped) heals in the lattice with a
+  licensed operator. The heal is pulled back through the symbolic gauge
+  coderivative into an inspection **finding** on the policy.
+* **Stock (evolving).** An agent with a surplus spends it proposing a
+  **control** clause. The control is kept only if the measured posture of
+  the policy improves and no new contradiction appears.
 
 Nodes:
-  ingest            (cheap tokenizer sub-agent)
-  scale_induction   (cheap motif miner + frontier hierarchy synthesizer)
-  mutation_proposal (spawn N cheap mutator sub-agents, gen-0)
-  mesh_spawn        (materialise MeshWorld: the world agents inhabit)
-  fitness           (frontier scoring of mutations by *measured* capacity)
-  artifact_emit     (frontier artifact designer -> runnable .py demo)
-  rectify           (apply best mutation -> lattice v1, with keep/rollback gate)
+  ingest           tokenise the policy                                (driver)
+  scale_induction  clauses -> lattice: principles, policies, controls,
+                   assets (deterministic parser; mapper fallback)     (mapper)
+  correspond       table of correspondences; one agent per clause,
+                   modulus and viable control operation               (mapper)
+  tick             Agent Mechanics tick law; typed edges, circuits,
+                   ranks, ensembles, clashes                            (none)
+  heal             leaking agents heal; findings in the policy        (driver)
+  stock            stocking agents propose controls (posture-gated)   (driver)
+  lora             distil traces; clamp the adapter into the driver     (none)
+  artifact_emit    hardened policy + findings report + NX-1 report      (none)
 
-Edges (v0): ingest -> scale_induction -> mutation_proposal -> mesh_spawn
-            -> fitness -> artifact_emit -> rectify -> END
-  rectify may route back to mutation_proposal while iteration < max_iterations.
-
-Keep/rollback gate (rectify):
-- lattice mutations are applied, then measured (executed enumeration + holdout
-  motif coverage); kept only if capacity does not regress and coverage holds;
-- rewire_topology proposals patch TOPOLOGY at runtime, but only if the patch is
-  acyclic, references known nodes, and the graph still compiles; otherwise the
-  previous topology is restored. Patches take effect on the next build_graph().
+Edges: ingest -> scale_induction -> correspond -> tick -> heal -> stock -> lora
+       lora -> correspond while iteration < max_iterations, else artifact_emit -> END.
 """
 
 from __future__ import annotations
@@ -32,47 +38,40 @@ from typing import Any
 
 from langgraph.graph import END, StateGraph
 
-from . import agents, rewrite
-from . import inhabitants as spawn
-from .mesh import MeshWorld
+from . import agents, security
+from . import correspondence as tc
+from . import lora as lora_mod
+from .mechanics import agent_name
 from .mutations import apply_mutation
+from .routing import call_llm
 from .state import NomosState, new_run_state
+from .world import World, drive_config, viable_operations
 
-# Explicit, inspectable topology table. RSI loop may patch this at runtime.
 TOPOLOGY: dict[str, Any] = {
     "nodes": [
         "ingest",
         "scale_induction",
-        "mutation_proposal",
-        "mesh_spawn",
-        "fitness",
+        "correspond",
+        "tick",
+        "heal",
+        "stock",
+        "lora",
         "artifact_emit",
-        "rectify",
     ],
     "edges": [
         ["ingest", "scale_induction"],
-        ["scale_induction", "mutation_proposal"],
-        ["mutation_proposal", "mesh_spawn"],
-        ["mesh_spawn", "fitness"],
-        ["fitness", "artifact_emit"],
-        ["artifact_emit", "rectify"],
+        ["scale_induction", "correspond"],
+        ["correspond", "tick"],
+        ["tick", "heal"],
+        ["heal", "stock"],
+        ["stock", "lora"],
     ],
     "entry": "ingest",
-    "conditional": {"rectify": {"to_mutation_proposal_if": "iteration < max_iterations else END"}},
-    "version": "graph/v0",
+    "conditional": {"lora": {"to_correspond_if": "iteration < max_iterations else artifact_emit"}},
+    "version": "graph/v1-leak-stock-security",
 }
 
-N_MUTATORS_GEN0 = int(os.environ.get("NOMOSLOOP_MUTATORS", "6"))
-FITNESS_ACCEPT_THRESHOLD = float(os.environ.get("NOMOSLOOP_ACCEPT", "5.0"))
-SPAWN_BUDGET = int(os.environ.get("NOMOSLOOP_SPAWN_BUDGET", "2"))
-SPAWN_PEERS = int(os.environ.get("NOMOSLOOP_SPAWN_PEERS", "2"))
-SPAWN_CHILDREN_CAP = int(os.environ.get("NOMOSLOOP_SPAWN_CHILDREN_CAP", "8"))
-
-
-# Optional live observer (GUI / telemetry). Called as
-#   observer(phase, node_name, state, update)
-# with phase "enter" (update=None) or "exit" (update = the node's returned dict).
-# Observers must never break the loop: exceptions are swallowed.
+# Optional live observer (GUI / telemetry): observer(phase, node, state, update).
 NodeObserver = Callable[[str, str, NomosState, "dict[str, Any] | None"], None]
 _OBSERVER: NodeObserver | None = None
 
@@ -104,428 +103,599 @@ def _observed(name: str, fn: Callable[[NomosState], dict[str, Any]]):
     return wrapped
 
 
-def _log(state: NomosState, tier: str, model: str, agent: str, task: str, offline: bool) -> None:
-    state.setdefault("routing_log", []).append(
-        {"agent": agent, "task": task, "tier": tier, "model": model, "offline": offline}
+def _log(state: NomosState, r: dict[str, Any], agent: str, task: str) -> list[dict[str, Any]]:
+    rl = list(state.get("routing_log", []) or [])
+    rl.append(
+        {
+            "agent": agent,
+            "task": task,
+            "tier": r["tier"],
+            "model": r["model"],
+            "offline": r["offline"],
+        }
     )
+    return rl
 
 
-# -- nodes (thin orchestrators; heavy lifting lives in agents.py) -----------
+def _cfg(state: NomosState) -> dict[str, Any]:
+    return dict(state.get("rsi_cfg") or {})
+
+
+# ------------------------------------------------------------------ nodes --
 
 
 def ingest_node(state: NomosState) -> dict[str, Any]:
-    """Node 1/3 (required): ingest arbitrary formal text -> tokens."""
     out = agents.tokenizer_agent(state.get("raw_text", ""))
-    _log(state, out["tier"], out["model"], "tokenizer", "tokenise", out["offline"])
     return {
         "tokens": out["tokens"],
-        "routing_log": state.get("routing_log", []),
+        "routing_log": _log(state, out, "tokenizer", "tokenise"),
         "topology_log": [f"ingest: {len(out['tokens'])} tokens via {out['model']}"],
     }
 
 
 def scale_induction_node(state: NomosState) -> dict[str, Any]:
-    """Node 2/3 (required): motif extraction (cheap) -> hierarchy (frontier).
-
-    Real mined motifs are split deterministically: ~1 in 4 is held out of
-    induction and used later as a generalization gate for mutations.
-    """
-    mined = agents.motif_miner_agent(state.get("raw_text", ""), state.get("tokens", []))
-    _log(state, mined["tier"], mined["model"], "motif_miner", "motif_mine", mined["offline"])
-    real = [m for m in mined["motifs"] if "synthetic-backfill" not in (m.get("contexts") or [])]
-    holdout = [m for i, m in enumerate(real) if i % 4 == 3][:8] or real[:2]
-    holdout_ids = {m["id"] for m in holdout}
-    train = [m for m in mined["motifs"] if m["id"] not in holdout_ids]
-    synth = agents.hierarchy_synthesizer_agent(
-        state.get("raw_text", ""), train, state.get("law_id", "law-x")
-    )
-    _log(
-        state,
-        synth["tier"],
-        synth["model"],
-        "hierarchy_synthesizer",
-        "hierarchy_synthesis",
-        synth["offline"],
-    )
-    lattice = synth["lattice"]
-    issues = agents.consistency_checker_agent(lattice)
-    hist = list(state.get("lattice_history", [])) + [copy.deepcopy(lattice)]
-    base = rewrite.measured_capacity(lattice)
-    coverage = rewrite.holdout_coverage(lattice, holdout)
-    return {
-        "motifs": mined["motifs"],
-        "holdout_motifs": holdout,
-        "scale_lattice": lattice,
-        "lattice_history": hist,
-        "baseline_capacity": base["capacity"],
-        "capacity_history": [
+    """Policy clauses -> lattice. Free-form text falls back to the mapper's synthesis."""
+    raw = state.get("raw_text", "")
+    rl = list(state.get("routing_log", []) or [])
+    lattice = security.parse_policy(raw, state.get("law_id", "law-x"))
+    source = "policy-parser"
+    if lattice is None:
+        mined = agents.motif_miner_agent(raw, state.get("tokens", []))
+        rl.append(
             {
-                "version": lattice.get("version"),
-                "iteration": 0,
-                "source": "induction",
-                "capacity": base["capacity"],
-                "instances": base["instances"],
-                "coverage": coverage,
+                "agent": "motif_miner",
+                "task": "motif_mine",
+                "tier": mined["tier"],
+                "model": mined["model"],
+                "offline": mined["offline"],
             }
-        ],
-        "routing_log": state.get("routing_log", []),
-        "topology_log": [
-            f"scale_induction: lattice {lattice.get('version')} "
-            f"{len(lattice.get('levels', []))} levels, "
-            f"{sum(len(lv.get('rules', [])) for lv in lattice.get('levels', []))} rules; "
-            f"holdout={len(holdout)} motifs; measured instances={base['instances']} "
-            f"capacity={base['capacity']:.3f} coverage={coverage:.2f}; "
-            f"consistency={issues['issues']}"
-        ],
-    }
-
-
-def mutation_proposal_node(state: NomosState) -> dict[str, Any]:
-    """Node 3/3 (required): spawn gen-0 mutator sub-agent swarm."""
-    lattice = state.get("scale_lattice", {})
-    proposals = list(state.get("mutation_proposals", []))
-    start_idx = len(proposals)
-    n = int(state.get("n_mutators", -1))
-    if n < 0:
-        n = N_MUTATORS_GEN0
-    for i in range(n):
-        out = agents.mutation_proposer_agent(lattice, idx=start_idx + i)
-        _log(
-            state,
-            out["tier"],
-            out["model"],
-            out["proposal"]["author_agent"],
-            "mutation_propose",
-            out["offline"],
         )
-        proposals.append(out["proposal"])
+        synth = agents.hierarchy_synthesizer_agent(
+            raw, mined["motifs"], state.get("law_id", "law-x")
+        )
+        rl.append(
+            {
+                "agent": "hierarchy_synthesizer",
+                "task": "hierarchy_synthesis",
+                "tier": synth["tier"],
+                "model": synth["model"],
+                "offline": synth["offline"],
+            }
+        )
+        lattice = dict(synth["lattice"])
+        source = "mapper-synthesis"
+    pos = security.posture(lattice)
+    n_rules = sum(len(lv.get("rules", [])) for lv in lattice.get("levels", []))
     return {
-        "mutation_proposals": proposals,
-        "routing_log": state.get("routing_log", []),
-        "topology_log": [f"mutation_proposal: spawned gen-0 swarm of {n} (total {len(proposals)})"],
-    }
-
-
-def mesh_spawn_node(state: NomosState) -> dict[str, Any]:
-    """Materialise the mesh world agents inhabit (lesser + higher instantiations).
-
-    Each node gets one inhabitant carrying the loop seed (law, lattice
-    version, rule, budget). Inhabitants then perform one governed spawn round:
-    a few same-level peers plus downward children — the first recursive
-    self-instantiation. Same-or-down only; budget-gated; fully logged.
-    """
-    lattice = state.get("scale_lattice", {})
-    law_hash = state.get("law_hash", "h0")
-    world = MeshWorld().spawn_from_lattice(lattice, state.get("motifs", []), law_hash, fanout=3)
-    swarm = spawn.populate(world, lattice, state.get("law_id", "law-x"), budget=SPAWN_BUDGET)
-    log: list[dict[str, Any]] = list(state.get("spawn_log", []))
-    peers, children = 0, 0
-    ops = ["refine_split", "elevate", "add_rule"]
-    for iid in sorted(swarm):
-        if peers >= SPAWN_PEERS:
-            break
-        try:
-            child, _ = spawn.spawn_peer(swarm, world, lattice, iid, ops[peers % len(ops)], law_hash)
-            log.append(spawn.log_event(iid, child["id"], "peer", str(child.get("level"))))
-            peers += 1
-        except ValueError:
-            continue
-    for iid in sorted(swarm):
-        if children >= SPAWN_CHILDREN_CAP:
-            break
-        if iid not in swarm:  # newborns of this round do not spawn further this round
-            continue
-        try:
-            child, _ = spawn.spawn_child(swarm, world, lattice, iid, law_hash)
-            log.append(spawn.log_event(iid, child["id"], "child", str(child.get("level"))))
-            children += 1
-        except ValueError:
-            continue
-    nodes, edges = world.snapshot()
-    stats = world.instantiation_capacity(lattice)
-    return {
-        "mesh_nodes": nodes,
-        "mesh_edges": edges,
-        "inhabitants": spawn.records(swarm),
-        "spawn_log": log,
-        "fitness_report": {
-            **state.get("fitness_report", {}),
-            "mesh_stats": stats,
-            "mesh_size": len(nodes),
-        },
+        "scale_lattice": lattice,  # type: ignore[typeddict-item]
+        "lattice_history": [copy.deepcopy(lattice)],  # type: ignore[list-item]
+        "posture_history": [
+            {"version": lattice.get("version"), "iteration": 0, "source": "induction", **pos}
+        ],
+        "routing_log": rl,
         "topology_log": [
-            f"mesh_spawn: {len(nodes)} instantiations ({peers} peers, {children} children), "
-            f"{len(edges)} expansions, {len(swarm)} inhabitants, cap={stats}"
+            f"scale_induction ({source}): {len(lattice.get('levels', []))} levels, {n_rules} clauses; "
+            f"posture={pos['score']:.3f} diversity={pos['diversity']:.2f} contradictions={pos['contradictions']} "
+            f"missing={','.join(pos['missing']) or '—'}"
         ],
     }
 
 
-def fitness_node(state: NomosState) -> dict[str, Any]:
-    """Measured scoring of every proposed-but-untested mutation.
+def _world(state: NomosState) -> World:
+    w = state.get("world")
+    if isinstance(w, World):
+        return w
+    cfg = _cfg(state)
+    params, _ = drive_config(cfg.get("drive", "bal"), cfg.get("sensitivity"))
+    w = World(
+        params=params,
+        drive=cfg.get("drive", "bal"),
+        lambda_am=float(cfg.get("lambda_am", 0.7)),
+        run_id=state.get("run_id", "run"),
+    )
+    w.ensure_root(state.get("raw_text", ""))
+    return w
 
-    Each proposal is applied in-memory and both lattices are executed; the
-    score reflects the real capacity delta and holdout coverage delta, so
-    declared generative_power cannot game the verdict.
-    """
-    lattice = state.get("scale_lattice", {})
-    mesh_stats = state.get("fitness_report", {}).get("mesh_stats", {})
-    holdout = state.get("holdout_motifs", []) or []
-    proposals = list(state.get("mutation_proposals", []))
-    accepted = list(state.get("accepted_mutations", []))
-    for p in proposals:
-        if p.get("status") != "proposed":
-            continue
-        scored = agents.fitness_evaluator_agent(lattice, p, mesh_stats, holdout)
-        _log(
-            state,
-            scored["tier"],
-            scored["model"],
-            "fitness_evaluator",
-            "mutation_score",
-            scored["offline"],
+
+def correspond_node(state: NomosState) -> dict[str, Any]:
+    """Build/refresh the table of correspondences and instantiate agents."""
+    cfg = _cfg(state)
+    world = _world(state)
+    lattice = dict(state.get("scale_lattice", {}))
+    ops = viable_operations(lattice, int(cfg.get("mutators", 8)))
+    nodes, edges = tc.lattice_ax(lattice, ops)
+    known = {r.ax_ref for r in world.rows if r.alive}
+    fresh = [n for n in nodes if n.ref not in known]
+    rl = list(state.get("routing_log", []) or [])
+    mapped: dict[str, dict[str, Any]] = {}
+    mapper_name = "offline-lexicon"
+    for i in range(0, len(fresh), 16):
+        got, r = tc.map_rows_llm(fresh[i : i + 16], call_llm)
+        rl.append(
+            {
+                "agent": "toc_mapper",
+                "task": "toc_map",
+                "tier": r["tier"],
+                "model": r["model"],
+                "offline": r["offline"],
+            }
         )
-        p["test_score"] = scored["score"]
-        p["fitness_breakdown"] = scored["breakdown"]
-        p["status"] = "accepted" if scored["score"] >= FITNESS_ACCEPT_THRESHOLD else "rejected"
-        if p["status"] == "accepted":
-            accepted.append(copy.deepcopy(p))
-    rep = {
-        "mesh_stats": mesh_stats,
-        "mesh_size": state.get("fitness_report", {}).get("mesh_size"),
-        "accepted": [p["id"] for p in accepted],
-        "rejected": [p["id"] for p in proposals if p.get("status") == "rejected"],
-        "threshold": FITNESS_ACCEPT_THRESHOLD,
-    }
+        mapped.update(got)
+        if got:
+            mapper_name = r["model"]
+            for ref, data in got.items():
+                for c in data.get("conflicts", []):
+                    edges.append((ref, c, 3.141592653589793))
+    res = world.sync(nodes, edges, mapped, mapper_name)
+    declared = cfg.get("mapper_arc_agi2")
+    note = ""
+    if fresh and (declared is None or float(declared) <= 70):
+        note = " (mapper recommendation ARC-AGI-2 > 70 not declared)"
     return {
-        "mutation_proposals": proposals,
-        "accepted_mutations": accepted,
-        "fitness_report": rep,
-        "routing_log": state.get("routing_log", []),
+        "world": world,
+        "ops_by_ref": {f"op/{o['id']}": o for o in ops},
+        "routing_log": rl,
         "topology_log": [
-            f"fitness: {len(accepted)} accepted / {len(proposals)} tested "
-            f"(measured; holdout={len(holdout)})"
+            f"correspond: {len(nodes)} policy elements, {len(fresh)} new rows "
+            f"({len(mapped)} by {mapper_name}), {res['born']} agents born, {res['tombstoned']} tombstoned{note}"
+        ],
+    }
+
+
+def tick_node(state: NomosState) -> dict[str, Any]:
+    cfg = _cfg(state)
+    world = _world(state)
+    world.run_ticks(int(cfg.get("ticks_per_loop", 3)))
+    clashes = world.clashes()
+    for f in clashes[:4]:
+        world.event(
+            "clash",
+            f.i1,
+            f"clash F(AX:{f.a1},AX:{f.a2};AM:{f.i1},AM:{f.i2}) f={f.f:.2f}",
+            a1=f.a1,
+            a2=f.a2,
+            f=round(f.f, 3),
+        )
+    live = list(world.live().values())
+    n_leak = sum(1 for a in live if a.state == "leak")
+    n_stock = sum(1 for a in live if a.state == "stock")
+    return {
+        "world": world,
+        "topology_log": [
+            f"tick: t={world.t} agents={len(live)} leak={n_leak} stock={n_stock} "
+            f"ensembles={len(world.ensembles)} clashes={len(clashes)} L_G={world.ensemble_leak():.3f}"
+        ],
+    }
+
+
+def heal_node(state: NomosState) -> dict[str, Any]:
+    """Leak: agents heal in the lattice; each heal becomes a finding on the policy."""
+    cfg = _cfg(state)
+    world = _world(state)
+    _, budgets = drive_config(cfg.get("drive", "bal"), cfg.get("sensitivity"))
+    budget = int(cfg.get("heal_budget") or budgets["heal_budget"])
+    leakers = sorted(
+        (a for a in world.live().values() if a.state == "leak"), key=lambda a: (-a.L, a.id)
+    )[:budget]
+    rl = list(state.get("routing_log", []) or [])
+    buf = list(state.get("lora_buffer", []) or [])
+    healed = 0
+    clashes = world.clashes()
+    objective = str(cfg.get("objective") or "")
+    for a in leakers:
+        before_name = agent_name(a, world.params)
+        rec = world.heal(a)
+        if rec["op"] == "e":
+            world.event("heat", a.id, "leak with no licensed heal that lowers it (heat)")
+            continue
+        healed += 1
+        edits = tc.coderivative(rec["op"], a.id, world.rows)
+        mine = [f for f in clashes if a.id in (f.i1, f.i2)][:3]
+        texts = {
+            ref: (world.ax[ref].text if ref in world.ax else "")
+            for f in mine
+            for ref in (f.a1, f.a2)
+        }
+        prompt = (
+            f"Security objective: {objective or 'protect the institution'}.\n"
+            f"Agent {a.id} = {before_name} leaks ({rec.get('cause')}) on {rec.get('species')}.\n"
+            f"Clashing clauses: {[(f.a1, texts.get(f.a1, '')[:160], f.a2, texts.get(f.a2, '')[:160], round(f.f, 2)) for f in mine]}.\n"
+            f"Licensed heal chosen in the lattice: {rec['op']} -> {[e.symbol + ' @ ' + e.ax_ref for e in edits]}.\n"
+            "In two sentences, state the security finding and the remediation."
+        )
+        note = ""
+        if cfg.get("cot", True):
+            r = call_llm(
+                prompt,
+                task_kind="heal_cot",
+                system="You are a security inspection agent. Be concrete and brief.",
+                max_tokens=220,
+            )
+            rl.append(
+                {
+                    "agent": f"heal:{a.id}",
+                    "task": "heal_cot",
+                    "tier": r["tier"],
+                    "model": r["model"],
+                    "offline": r["offline"],
+                }
+            )
+            if not r["offline"]:
+                note = r["text"].strip()[:500]
+                world.rounds += 1
+        if not note:
+            if mine:
+                f = mine[0]
+                q1 = _clause(texts.get(f.a1, ""))
+                q2 = _clause(texts.get(f.a2, ""))
+                note = (
+                    f"{f.a1.split('/')[-1]}{q1} and {f.a2.split('/')[-1]}{q2} cannot both hold "
+                    f"(frustration {f.f:.2f}). Remediation ({rec['op']}): {tc.EDITS.get(rec['op'], '')}."
+                )
+            else:
+                note = f"{a.id} stores too little of what reaches it on {rec.get('species')} ({rec.get('cause')}). Remediation ({rec['op']}): {tc.EDITS.get(rec['op'], '')}."
+        lk = f"{rec.get('species')}:{rec.get('cause')}{rec['before']:.2f}"
+        world.event(
+            "leak",
+            a.id,
+            f"leak[{lk}] heal({rec['op']}) => {agent_name(a, world.params).split('/')[0]}",
+            op=rec["op"],
+            before=round(rec["before"], 3),
+            after=round(rec["after"], 3),
+            memory=rec["memory"],
+        )
+        severity = max([f.weight for f in mine], default=0.0) * 0.6 + rec["before"] * 0.4
+        world.inspections.append(
+            {
+                "t": world.t,
+                "agent": a.id,
+                "name": before_name,
+                "op": rec["op"],
+                "cause": rec.get("cause"),
+                "species": rec.get("species"),
+                "severity": round(severity, 3),
+                "leak_before": round(rec["before"], 3),
+                "leak_after": round(rec["after"], 3),
+                "trials": rec["trials"],
+                "memory": rec["memory"],
+                "edits": [e.as_dict() for e in edits],
+                "clashes": [{"a1": f.a1, "a2": f.a2, "f": round(f.f, 3)} for f in mine],
+                "finding": note,
+            }
+        )
+        answer = f"heal({rec['op']}); " + "; ".join(f"{e.symbol} on {e.ax_ref}" for e in edits[:3])
+        buf.append(lora_mod.example("heal", prompt, answer))
+    return {
+        "world": world,
+        "routing_log": rl,
+        "lora_buffer": buf,
+        "topology_log": [
+            f"heal: {healed}/{len(leakers)} leaking agents healed; "
+            f"rounds/solve={world.rounds_per_solve():.2f}; L_G={world.ensemble_leak():.3f}"
+        ],
+    }
+
+
+def _clause(text: str) -> str:
+    """Quote the clause body of an AX node text ('name: pattern => rewrite')."""
+    body = text.split("=>", 1)[-1].strip() if text else ""
+    return f' ("{body[:110]}{"…" if len(body) > 110 else ""}")' if body else ""
+
+
+def _next_version(v: str) -> str:
+    try:
+        return f"v{int(str(v).lstrip('v')) + 1}"
+    except ValueError:
+        return "v1"
+
+
+def stock_node(state: NomosState) -> dict[str, Any]:
+    """Stock: agents with a surplus propose controls; posture gates them."""
+    cfg = _cfg(state)
+    world = _world(state)
+    _, budgets = drive_config(cfg.get("drive", "bal"), cfg.get("sensitivity"))
+    budget = int(cfg.get("stock_budget") or budgets["stock_budget"])
+    lattice: dict[str, Any] = copy.deepcopy(dict(state.get("scale_lattice", {})))
+    post_hist = list(state.get("posture_history", []) or [])
+    rollbacks = list(state.get("rollbacks", []) or [])
+    controls = list(state.get("controls", []) or [])
+    hist = list(state.get("lattice_history", []) or [])
+    ops_by_ref = state.get("ops_by_ref") or {}
+    rl = list(state.get("routing_log", []) or [])
+    buf = list(state.get("lora_buffer", []) or [])
+    objective = str(cfg.get("objective") or "")
+    it = int(state.get("iteration", 0)) + 1
+    levels = [str(lv.get("level_id")) for lv in lattice.get("levels", []) or []]
+    if levels and "L1" not in levels:
+        lattice = security.ensure_controls_level(lattice)
+    target_level = "L1" if levels else ""
+    stockers = sorted(
+        (a for a in world.live().values() if a.state == "stock"), key=lambda a: (-a.dw_hat, a.id)
+    )[:budget]
+    kept = 0
+    for a in stockers:
+        rows = world.rows_of(a.id)
+        if not rows or not target_level:
+            continue
+        ax_ref = rows[0].ax_ref
+        node = world.ax.get(ax_ref)
+        before = security.posture(lattice)
+        if a.op and ax_ref in ops_by_ref:  # an operation agent adds its own function
+            fn = ops_by_ref[ax_ref]["function"]
+            op = "sigma"
+            text = security.function_control(
+                fn, security.subject(objective) if objective else "all assets in scope", objective
+            )
+        else:
+            op = a.last_op or ("sigma" if before["missing"] else "r")
+            fn, text = security.control_clause(
+                op, a.hero(), node.text if node else "", lattice, objective, salt=a.id
+            )
+        if cfg.get("cot", True):
+            prompt = (
+                f"Security objective: {objective or 'protect the institution'}.\n"
+                f"Clause: {(node.text if node else ax_ref)[:300]}\n"
+                f"Lattice operator {op}: {tc.EDITS.get(op, '')}. Function to add: {security.FUNCTION[fn]}.\n"
+                f"Draft: {text}\nRewrite the draft as ONE enforceable control sentence. Output only the sentence."
+            )
+            r = call_llm(
+                prompt,
+                task_kind="stock_cot",
+                system="You write precise, enforceable security controls.",
+                max_tokens=120,
+            )
+            rl.append(
+                {
+                    "agent": f"stock:{a.id}",
+                    "task": "stock_cot",
+                    "tier": r["tier"],
+                    "model": r["model"],
+                    "offline": r["offline"],
+                }
+            )
+            world.rounds += 1
+            cand_text = r["text"].strip().strip('"').split("\n")[0][:300]
+            if not r["offline"] and len(cand_text) > 12:
+                text = cand_text
+        rid = f"§R{len(controls) + 1}"
+        mutation = {
+            "operation": "add_rule",
+            "payload": {
+                "new_rule": {
+                    "id": rid,
+                    "name": " ".join(text.split()[:6]),
+                    "level": target_level,
+                    "pattern": security.subject(text),
+                    "rewrite": text,
+                    "provenance": f"rsi:{a.id}:{op}",
+                }
+            },
+        }
+        cand = dict(apply_mutation(lattice, mutation))  # type: ignore[arg-type]
+        after = security.posture(cand)
+        new_contra = after["contradictions"] > before["contradictions"]
+        if after["score"] > before["score"] + 1e-6 and not new_contra:
+            old_v = str(lattice.get("version", "v0"))
+            lattice = cand
+            lattice["version"] = _next_version(old_v)
+            ref = f"pol/{target_level}/{rid}"
+            world.pending_parent[ref] = a.id
+            hist.append(copy.deepcopy(lattice))
+            post_hist.append(
+                {
+                    "version": lattice["version"],
+                    "iteration": it,
+                    "source": f"stock:{a.id}:{op}",
+                    **after,
+                }
+            )
+            controls.append(
+                {
+                    "id": rid,
+                    "ref": ref,
+                    "text": text,
+                    "function": fn,
+                    "agent": a.id,
+                    "op": op,
+                    "clause": ax_ref,
+                    "posture_before": before["score"],
+                    "posture_after": after["score"],
+                    "version": lattice["version"],
+                }
+            )
+            gain = after["score"] - before["score"]
+            world.feed(a.id, 1.0 + 20.0 * gain)
+            world.solves += 1
+            kept += 1
+            world.event(
+                "stock",
+                a.id,
+                f"stock[{a.dw_hat:.2f}] evolve({op}: {security.FUNCTION[fn]}) => AX:{ref}  posture {before['score']:.3f}->{after['score']:.3f}",
+                op=op,
+                ref=ref,
+                version=lattice["version"],
+            )
+            buf.append(
+                lora_mod.example(
+                    "stock",
+                    f"{agent_name(a, world.params)} stocks on {ax_ref}. Which control?",
+                    text,
+                )
+            )
+        else:
+            reason = (
+                "would add a contradiction"
+                if new_contra
+                else f"posture would not improve ({before['score']:.3f} -> {after['score']:.3f})"
+            )
+            rollbacks.append(
+                {"agent": a.id, "op": op, "text": text, "iteration": it, "reason": reason}
+            )
+            world.event("rollback", a.id, f"stock[{a.dw_hat:.2f}] control rolled back: {reason}")
+        world.spend(a, 0.3 * world.params.E0)
+    return {
+        "world": world,
+        "scale_lattice": lattice,  # type: ignore[typeddict-item]
+        "lattice_history": hist,
+        "posture_history": post_hist,
+        "rollbacks": rollbacks,
+        "controls": controls,
+        "routing_log": rl,
+        "lora_buffer": buf,
+        "topology_log": [
+            f"stock: {len(stockers)} stocking agents; {kept} controls kept; policy {lattice.get('version')}"
+        ],
+    }
+
+
+def lora_node(state: NomosState) -> dict[str, Any]:
+    cfg = _cfg(state)
+    world = _world(state)
+    lcfg = lora_mod.LoraConfig(**(state.get("lora_cfg") or {}))
+    lstate = state.get("lora_state")
+    if not isinstance(lstate, lora_mod.LoraState):
+        lstate = lora_mod.LoraState()
+    post = state.get("posture_history", []) or []
+    metric = {
+        "rounds_per_solve": round(world.rounds_per_solve(), 4),
+        "leak": round(world.ensemble_leak(), 4),
+        "capacity": round(float(post[-1]["score"]) if post else 0.0, 4),
+        "solves": float(world.solves),
+        "space": float(world.coverage_history[-1]["space"] if world.coverage_history else 0),
+    }
+    if not lcfg.out_dir:
+        base = os.path.dirname(state.get("artifact_path") or "") or "artifacts"
+        lcfg.out_dir = os.path.join(base, f"lora_{state.get('run_id', 'run')}")
+    if cfg.get("lora_dataset", True):
+        lora_mod.append_examples(lstate, lcfg.out_dir, list(state.get("lora_buffer", []) or []))
+    rec = lora_mod.step(lcfg, lstate, metric, state.get("run_id", "run"), world.t)
+    world.event(
+        "clamp",
+        "LoRA",
+        f"clamp(lora=adapter{lcfg.adapter_id},scale={lstate.scale:.2f}) {rec['decision']}",
+        decision=rec["decision"],
+        scale=lstate.scale,
+    )
+    return {
+        "world": world,
+        "lora_state": lstate,
+        "lora_cfg": {**(state.get("lora_cfg") or {}), "out_dir": lcfg.out_dir},
+        "lora_buffer": [],
+        "iteration": int(state.get("iteration", 0)) + 1,
+        "topology_log": [
+            f"lora: {lstate.examples} examples, decision={rec['decision']} scale={lstate.scale:.2f} "
+            f"pushed={rec['clamp'].get('pushed')}; metric={metric}"
         ],
     }
 
 
 def artifact_emit_node(state: NomosState) -> dict[str, Any]:
-    """Frontier artifact designer -> self-contained runnable Python demo."""
-    out = agents.artifact_designer_agent(
-        state.get("scale_lattice", {}), state.get("accepted_mutations", []), state.get("motifs", [])
-    )
-    _log(state, out["tier"], out["model"], "artifact_designer", "artifact_design", out["offline"])
-    path = state.get("artifact_path") or f"artifacts/artifact_{state.get('run_id', 'run-x')}.py"
+    world = _world(state)
+    text = security_report(state, world)
+    path = state.get("artifact_path") or f"artifacts/rsi_{state.get('run_id', 'run-x')}.md"
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        f.write(out["code"])
+        f.write(text)
+    report = os.path.splitext(path)[0] + ".nx1.md"
+    with open(report, "w", encoding="utf-8") as f:
+        f.write(world.nx1_report())
     return {
-        "artifact_code": out["code"],
+        "artifact_code": text,
         "artifact_path": path,
-        "routing_log": state.get("routing_log", []),
-        "topology_log": [
-            f"artifact_emit: wrote {path} ({len(out['code'])} chars via {out['model']})"
-        ],
+        "nx1_path": report,
+        "topology_log": [f"artifact_emit: wrote {path} and {report}"],
     }
 
 
-def _next_version(old_v: str, fallback: int) -> str:
-    try:
-        return f"v{int(str(old_v).lstrip('v')) + 1}"
-    except Exception:
-        return f"v{fallback}"
+def security_report(state: NomosState, world: World) -> str:
+    """Hardened policy, findings and coverage as one markdown document."""
+    lat = state.get("scale_lattice", {}) or {}
+    post = state.get("posture_history", []) or []
+    first, last = (post[0], post[-1]) if post else ({}, {})
+    controls = state.get("controls", []) or []
+    findings = sorted(world.inspections, key=lambda x: -x.get("severity", 0.0))
+    lines = [
+        f"# Hardened policy: {state.get('law_title', 'policy')}",
+        "",
+        f"Run `{state.get('run_id')}` · drive `{world.drive}` · λ_AM {world.lambda_am} · policy {lat.get('version')}",
+        "",
+        f"- Posture: {first.get('score', 0):.3f} → **{last.get('score', 0):.3f}** "
+        f"(function diversity {last.get('diversity', 0):.2f}, contradictory clause pairs {last.get('contradictions', 0)})",
+        f"- Findings: {len(findings)} · controls kept: {len(controls)} · rolled back: {len(state.get('rollbacks', []) or [])}",
+        f"- Agents: {len(world.live())} alive, {world.tombstones} tombstoned · ensembles: {len(world.ensembles)} · rounds per solve: {world.rounds_per_solve():.2f}",
+        "",
+        "Posture is bookkeeping over the policy text (diversity of covered security functions over contradictions). It does not certify that the institution is secure.",
+        "",
+        "## Findings (leak-driven)",
+        "",
+    ]
+    if not findings:
+        lines.append("No agent leaked enough to need healing.")
+    for i, fnd in enumerate(findings[:30], 1):
+        cl = (
+            "; ".join(f"`{c['a1']}` × `{c['a2']}` (f={c['f']:.2f})" for c in fnd.get("clashes", []))
+            or "no clash face"
+        )
+        lines.append(
+            f"{i}. **{fnd['agent']}** · severity {fnd.get('severity', 0):.2f} · heal `{fnd['op']}` · {cl}"
+        )
+        lines.append(f"   {fnd.get('finding', '')}")
+    lines += ["", "## Controls added (stock-driven)", ""]
+    if not controls:
+        lines.append("No control improved the measured posture.")
+    for c in controls:
+        lines.append(
+            f"- **{c['id']}** [{security.FUNCTION[c['function']]}] {c['text']} "
+            f"_(by {c['agent']} via `{c['op']}`, posture {c['posture_before']:.3f}→{c['posture_after']:.3f})_"
+        )
+    lines += ["", "## Policy (lattice " + str(lat.get("version")) + ")", ""]
+    for lv in lat.get("levels", []) or []:
+        lines.append(f"### {lv.get('level_id')} · {lv.get('name')}")
+        lines.append(f"_base: {lv.get('base', '')} · modulus: {lv.get('modulus', '')}_")
+        lines.append("")
+        for r in lv.get("rules", []) or []:
+            tag = " **(RSI)**" if str(r.get("provenance", "")).startswith("rsi:") else ""
+            lines.append(f"- {r.get('id')} {r.get('rewrite', '')}{tag}")
+        lines.append("")
+    if last.get("functions"):
+        lines += [
+            "## Function coverage",
+            "",
+            "| Species | Security function | Share |",
+            "|---|---|---|",
+        ]
+        for sp, share in last["functions"].items():
+            lines.append(f"| {sp} | {security.FUNCTION[sp]} | {share:.3f} |")
+        lines.append("")
+    return "\n".join(lines)
 
 
-def _reachable(edges: list[list[str]], src: str, dst: str) -> bool:
-    adj: dict[str, list[str]] = {}
-    for s, d in edges:
-        adj.setdefault(s, []).append(d)
-    seen, stack = {src}, [src]
-    while stack:
-        u = stack.pop()
-        for v in adj.get(u, []):
-            if v == dst:
-                return True
-            if v not in seen:
-                seen.add(v)
-                stack.append(v)
-    return False
-
-
-def _topology_patch_valid(patch: dict[str, Any], topo: dict[str, Any]) -> tuple:
-    """Static safety gate for rewire_topology patches.
-
-    A patch is valid only if it references known nodes, does not duplicate an
-    edge, and does not create an unconditional cycle (which would make
-    execution non-terminating).
-    """
-    nodes = set(topo.get("nodes", []))
-    edges = [list(e) for e in topo.get("edges", [])]
-    if "entry" in patch and patch["entry"] not in nodes:
-        return False, f"unknown entry {patch['entry']!r}"
-    if "entry" in patch and patch["entry"] == topo.get("entry"):
-        return False, f"entry already {patch['entry']!r} (no-op)"
-    if "add_node" in patch and patch["add_node"] in nodes:
-        return False, f"duplicate node {patch['add_node']!r}"
-    if "add_edge" in patch:
-        edge = list(patch["add_edge"])
-        if len(edge) != 2:
-            return False, "add_edge needs [src, dst]"
-        s, d = edge
-        if s not in nodes or d not in nodes:
-            return False, f"unknown node in edge {s!r}->{d!r}"
-        if [s, d] in edges:
-            return False, f"duplicate edge {s!r}->{d!r}"
-        if _reachable(edges, d, s):
-            return False, f"edge {s!r}->{d!r} would create a cycle"
-    return True, ""
-
-
-def set_topology(topo: dict[str, Any]) -> dict[str, Any]:
-    """Restore/replace the topology table wholesale (rollback support)."""
-    TOPOLOGY.clear()
-    TOPOLOGY.update(copy.deepcopy(topo))
-    return describe_topology()
-
-
-def rectify_node(state: NomosState) -> dict[str, Any]:
-    """Apply accepted mutations in score order, each behind a keep/rollback gate.
-
-    Lattice mutations: applied, then measured (executed enumeration + holdout
-    coverage). Kept only if capacity does not regress and coverage does not
-    drop; otherwise the lattice is restored and the rollback is logged.
-
-    rewire_topology: the patch is validated (known nodes, no duplicate edge,
-    acyclic), applied, and the graph must recompile. Any failure restores the
-    previous topology. Kept patches are effective on the next build_graph().
-    """
-    lattice = copy.deepcopy(state.get("scale_lattice", {}))
-    accepted = sorted(
-        state.get("accepted_mutations", []) or [],
-        key=lambda p: p.get("test_score", 0),
-        reverse=True,
-    )
-    holdout = state.get("holdout_motifs", []) or []
-    caps = list(state.get("capacity_history", []) or [])
-    rollbacks = list(state.get("rollbacks", []) or [])
-    topo_patches = list(state.get("topology_history", []) or [])
-    it = int(state.get("iteration", 0)) + 1
-    topo = [f"rectify: iteration {it}"]
-    prev = (
-        caps[-1]
-        if caps
-        else {
-            "capacity": float(state.get("baseline_capacity", 0.0)),
-            "coverage": 0.0,
-            "version": lattice.get("version"),
-        }
-    )
-    for mut in accepted:
-        op = str(mut.get("operation", ""))
-        if op == "rewire_topology":
-            snapshot = describe_topology()
-            patch = dict((mut.get("payload") or {}).get("patch") or {})
-            ok, reason = _topology_patch_valid(patch, snapshot)
-            if ok:
-                try:
-                    mutate_topology(patch)
-                    build_graph()  # must still compile
-                except Exception as e:  # noqa: BLE001 - any compile failure rolls back
-                    set_topology(snapshot)
-                    ok, reason = False, f"compile failed: {e}"
-            else:
-                set_topology(snapshot)
-            topo_patches.append(
-                {"iteration": it, "patch": patch, "applied": bool(ok), "reason": reason}
-            )
-            if ok:
-                lattice.setdefault("provenance", {})["topology"] = (
-                    f"{mut['id']} (effective on rebuild)"
-                )
-                topo.append(f"topology patched via {mut['id']} {patch} (effective on rebuild)")
-            else:
-                rollbacks.append(
-                    {
-                        "mutation": mut["id"],
-                        "iteration": it,
-                        "reason": f"topology patch rejected: {reason}",
-                    }
-                )
-                topo.append(f"topology patch rolled back via {mut['id']}: {reason}")
-            continue
-        candidate = apply_mutation(lattice, mut)
-        after = rewrite.measured_capacity(candidate)
-        cov_before = rewrite.holdout_coverage(lattice, holdout)
-        cov_after = rewrite.holdout_coverage(candidate, holdout)
-        if (
-            after["capacity"] + 1e-9 >= float(prev.get("capacity", -1e9))
-            and cov_after + 1e-9 >= cov_before
-        ):
-            old_v = str(lattice.get("version", "v0"))
-            lattice = candidate
-            lattice["version"] = _next_version(old_v, len(state.get("lattice_history", [])))
-            lattice.setdefault("provenance", {})["elevation"] = (
-                f"{mut['id']} (score {mut.get('test_score')})"
-            )
-            caps.append(
-                {
-                    "version": lattice["version"],
-                    "iteration": it,
-                    "source": f"elevation:{mut['id']}",
-                    "capacity": after["capacity"],
-                    "instances": after["instances"],
-                    "coverage": cov_after,
-                }
-            )
-            prev = caps[-1]
-            topo.append(
-                f"elevated {old_v} -> {lattice['version']} via {mut['id']} "
-                f"(capacity {after['capacity']:.3f}, instances {after['instances']}, "
-                f"coverage {cov_after:.2f}, score {mut.get('test_score')})"
-            )
-        else:
-            reason = (
-                f"measured capacity {after['capacity']:.3f} < {float(prev.get('capacity', 0)):.3f}"
-                if after["capacity"] + 1e-9 < float(prev.get("capacity", -1e9))
-                else f"holdout coverage {cov_after:.2f} < {cov_before:.2f}"
-            )
-            rollbacks.append({"mutation": mut["id"], "iteration": it, "reason": reason})
-            topo.append(f"rolled back {mut['id']}: {reason}")
-    if not accepted:
-        topo.append("no accepted mutations; lattice unchanged (descriptive bloat blocked)")
-    hist = list(state.get("lattice_history", [])) + [copy.deepcopy(lattice)]
-    return {
-        "scale_lattice": lattice,
-        "lattice_history": hist,
-        "iteration": it,
-        "capacity_history": caps,
-        "rollbacks": rollbacks,
-        "topology_history": topo_patches,
-        "topology_log": topo,
-    }
-
-
-def _rectify_route(state: NomosState) -> str:
+def _route(state: NomosState) -> str:
     if int(state.get("iteration", 0)) < int(state.get("max_iterations", 1)):
-        return "mutation_proposal"
-    return END
+        return "correspond"
+    return "artifact_emit"
 
 
 def build_graph():
-    """Build the compiled LangGraph. Topology mirrors TOPOLOGY (inspectable)."""
     g = StateGraph(NomosState)
-    g.add_node("ingest", _observed("ingest", ingest_node))
-    g.add_node("scale_induction", _observed("scale_induction", scale_induction_node))
-    g.add_node("mutation_proposal", _observed("mutation_proposal", mutation_proposal_node))
-    g.add_node("mesh_spawn", _observed("mesh_spawn", mesh_spawn_node))
-    g.add_node("fitness", _observed("fitness", fitness_node))
-    g.add_node("artifact_emit", _observed("artifact_emit", artifact_emit_node))
-    g.add_node("rectify", _observed("rectify", rectify_node))
+    for name, fn in (
+        ("ingest", ingest_node),
+        ("scale_induction", scale_induction_node),
+        ("correspond", correspond_node),
+        ("tick", tick_node),
+        ("heal", heal_node),
+        ("stock", stock_node),
+        ("lora", lora_node),
+        ("artifact_emit", artifact_emit_node),
+    ):
+        g.add_node(name, _observed(name, fn))
     g.set_entry_point(TOPOLOGY["entry"])
     for s, d in TOPOLOGY["edges"]:
         g.add_edge(s, d)
     g.add_conditional_edges(
-        "rectify", _rectify_route, {"mutation_proposal": "mutation_proposal", END: END}
+        "lora", _route, {"correspond": "correspond", "artifact_emit": "artifact_emit"}
     )
+    g.add_edge("artifact_emit", END)
     return g.compile()
 
 
@@ -533,34 +703,33 @@ def describe_topology() -> dict[str, Any]:
     return copy.deepcopy(TOPOLOGY)
 
 
-def mutate_topology(patch: dict[str, Any]) -> dict[str, Any]:
-    """RSI self-modification hook: patch nodes/edges/entry at runtime.
-
-    Example: mutate_topology({"add_edge": ["fitness", "mutation_proposal"]})
-    Returns the new topology. Rebuild via build_graph().
-    """
-    if "add_node" in patch:
-        TOPOLOGY["nodes"].append(patch["add_node"])
-    if "add_edge" in patch:
-        TOPOLOGY["edges"].append(list(patch["add_edge"]))
-    if "entry" in patch:
-        TOPOLOGY["entry"] = patch["entry"]
-    TOPOLOGY["version"] += "+rsi"
-    return describe_topology()
-
-
 def run_pipeline(
     raw_text: str,
-    law_title: str = "untitled-law",
+    law_title: str = "untitled-policy",
     max_iterations: int = 1,
     artifact_path: str = "",
     mutators: int | None = None,
+    rsi_cfg: dict[str, Any] | None = None,
+    lora_cfg: dict[str, Any] | None = None,
 ) -> NomosState:
-    """Run the loop. `mutators=0` disables proposals (no-mutation baseline)."""
+    """Run the loop. ``mutators=0`` instantiates no operation agents (baseline)."""
     state = new_run_state(raw_text, law_title=law_title, max_iterations=max_iterations)
+    cfg = dict(rsi_cfg or {})
     if mutators is not None:
-        state["n_mutators"] = int(mutators)
+        cfg["mutators"] = int(mutators)
+    state["rsi_cfg"] = cfg
+    state["lora_cfg"] = dict(lora_cfg or {})
     if artifact_path:
         state["artifact_path"] = artifact_path
     app = build_graph()
-    return app.invoke(state)
+    return app.invoke(state, {"recursion_limit": 25 + 8 * max(1, int(max_iterations))})
+
+
+__all__ = [
+    "TOPOLOGY",
+    "build_graph",
+    "describe_topology",
+    "run_pipeline",
+    "security_report",
+    "set_observer",
+]

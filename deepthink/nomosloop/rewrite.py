@@ -17,8 +17,8 @@ Ground content is executable data: positional digit strings when a radix and
 alphabet are present (binary/decimal/... evaluation), else chart slots.
 
 Fitness is measured from enumerated instances + description cost, with a
-holdout-motif coverage term. A mutator cannot raise its own score by
-declaring generative_power; scoring applies the mutation and measures.
+holdout-motif coverage term. An agent cannot raise its own score by declaring
+generative_power: the stock gate applies the edit and measures.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ import math
 import re
 from typing import Any
 
-from .state import Motif, MutationProposal, ScaleLattice
+from .state import Motif, ScaleLattice
 
 MAX_INSTANCES = 10_000
 
@@ -232,37 +232,3 @@ def holdout_coverage(lattice: ScaleLattice, motifs: list[Motif]) -> float:
         if hit * 2 >= len(toks):
             covered += 1
     return covered / len(motifs)
-
-
-def score_mutation(
-    lattice: ScaleLattice, proposal: MutationProposal, holdout_motifs: list[Motif] | None = None
-) -> dict[str, Any]:
-    """Measured 0..10 score: apply the mutation, execute both, compare.
-
-    score = 5.0 + 4*tanh(20 * relative capacity delta) + 2*tanh(10 * coverage delta)
-    clamped to [0, 10]. Topology patches are capacity-neutral here and are
-    gated separately (compile + acyclicity + no regression) in graph.rectify.
-    """
-    from .mutations import apply_mutation
-
-    holdout = holdout_motifs or []
-    before = measured_capacity(lattice)
-    cov_before = holdout_coverage(lattice, holdout)
-    after_lattice = apply_mutation(lattice, proposal)
-    after = measured_capacity(after_lattice)
-    cov_after = holdout_coverage(after_lattice, holdout)
-    rel = (after["capacity"] - before["capacity"]) / max(1e-9, before["capacity"])
-    score = 5.0 + 4.0 * math.tanh(20.0 * rel) + 2.0 * math.tanh(10.0 * (cov_after - cov_before))
-    score = round(max(0.0, min(10.0, score)), 2)
-    return {
-        "score": score,
-        "breakdown": {
-            "capacity_before": round(before["capacity"], 4),
-            "capacity_after": round(after["capacity"], 4),
-            "instances_before": before["instances"],
-            "instances_after": after["instances"],
-            "coverage_before": round(cov_before, 4),
-            "coverage_after": round(cov_after, 4),
-            "rel_delta": round(rel, 6),
-        },
-    }

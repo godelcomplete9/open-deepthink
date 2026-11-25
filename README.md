@@ -4,6 +4,8 @@
 
 # open-deepthink: Evolvable Agent Networks for Deep, Structured Reasoning
 
+> **🛡 New: RSI for cybersecurity.** A recursive self-improvement loop that covers an institution's security policies with a lattice of agents, finds where the rules clash, and evolves them with controls that must raise a measured posture. It is built on the *Agent Mechanics* treatise, and a local model learns from every pass through a LoRA loop. [Jump to RSI ↓](#-rsi-recursive-self-improvement-for-cybersecurity)
+
 **Not another flat panel of 16 agents brainstorming once.**  
 A **Qualitative Neural Network (QNN)** that runs layered forward passes, reflects on its own performance, mutates its agents' cognitive identities, raises the difficulty of the problem, and records the entire developmental history as high-signal training data.
 
@@ -13,7 +15,7 @@ Most agentic systems give you breadth through parallelism. open-deepthink gives 
 
 This is a **structured multi-agent loop**: layered LLM calls, lexical retrieval of past cells, prompt rewrite between epochs, and JSON traces. Neural-net words (Mirror Descent, self-attention, diffusion) are a **design language**. They are not those algorithms. Output quality versus a single long prompt is **unevaluated**. See [`docs/DESIGN_NOTES.md`](./docs/DESIGN_NOTES.md) and [`docs/EVAL.md`](./docs/EVAL.md).
 
-A fourth mode — **RSI** — applies recursive self-improvement to formal artifacts (code repositories, math models, physics models, documentation): it induces a scale lattice, mutates it under a measured-capacity gate, and emits a runnable artifact. See [Mode 4](#4--rsi-mode-recursive-self-improvement-over-formal-artifacts).
+The fourth mode, **RSI**, is the newest. It applies recursive self-improvement to cybersecurity: an institution's policies are read as a law, covered with Agent Mechanics agents, healed where they clash, and evolved with posture-gated controls. It is described first, below.
 
 **Start small.** Auto mode caps at 24 agents. Prefer `2×2×1` or `3×3×2`. Estimate before you spend:
 
@@ -24,7 +26,163 @@ deepthink eval          # mock LLMs, no API key — structural checks only
 
 ---
 
-## 🎰 Qualitative Diffusion (QDAD) — New Technique
+## 🛡 RSI: recursive self-improvement for cybersecurity
+
+**RSI covers an institution's security policies with a lattice of agents.** It finds where the policies contradict themselves, heals them, and evolves them with new controls. A control is kept only when the policy's measured posture improves. Every pass is distilled into a LoRA adapter for the local model that drives the agents, so the next pass needs fewer reasoning rounds.
+
+It runs on **Agent Mechanics**, a formal theory of agents as conductors of eight species of information ([the treatise](./docs/Agent_Mechanics_Treatise_EN.pdf)). It also uses **NX-1**, a nomenclature complement written for this engine ([`docs/NOMENCLATURE_COMPLEMENT.md`](./docs/NOMENCLATURE_COMPLEMENT.md)).
+
+> RSI reasons over the **text** of your policies, runbooks and standards. It does not scan networks, test systems or certify anything. Its findings are leads for a human reviewer, and its posture score is bookkeeping over the text. Nothing here has been validated against real incidents.
+
+### What a run gives you
+
+| Output | Produced by | What it is |
+|---|---|---|
+| **Findings** | the leak-driven side (defensive) | Clauses that cannot both hold, and functions the mapping puts at odds. Each comes with the clauses involved, the licensed operator that healed it in the lattice, and the remediation it implies. Findings are ranked by severity. |
+| **Controls** | the stock-driven side (evolving) | New control clauses written by agents that have a surplus. Each one is kept only if posture rises and no new contradiction appears. |
+| **Hardened policy** | `artifact_emit` | The policy with the kept controls marked, plus the findings and function coverage, in one Markdown report. |
+| **NX-1 log** | the world | Every ensemble as a canonical string, the table of correspondences, and a tick-stamped event log in NX-1 notation. |
+| **LoRA dataset** | the `lora` node | Heal and control traces as chat-format JSONL, ready for a trainer. |
+
+### The mechanism, step by step
+
+**1. The policy becomes a law.** Clauses are parsed onto four levels: **L3 principles** (purpose, scope), **L2 policies** (who may do what), **L1 controls** (prevent, detect, respond, recover) and **L0 assets**. Section headers decide the level when present; keywords decide it otherwise. Each level carries a *base* (how it packs the level below) and a *modulus* (what closes it, such as least privilege for L2).
+
+**2. Every clause, modulus and viable operation becomes an agent.** A **table of correspondences** maps each element onto the eight species of Agent Mechanics. Each species is read as a security function:
+
+| Species | Security function | Species | Security function |
+|---|---|---|---|
+| **Ni** | threat forecasting, attack paths | **Ti** | access rules, input validation |
+| **Ne** | red-team testing, discovery | **Te** | incident response, patching |
+| **Si** | audit logging, retention, baselines | **Fi** | identity, integrity, least privilege |
+| **Se** | real-time monitoring, alerting | **Fe** | coordination, notification, rollout |
+
+The mapping is done by a **mapper** model. One scoring **above 70 on ARC-AGI-2** is recommended, since the mapping is an abstraction-transfer task. The score you declare is recorded with every row, not verified. Without a mapper, the local driver maps, and offline a lexicon does. Viable operations, one *add control* per under-covered function, become agents too. Each agent gets a name in the treatise's nomenclature, for example `A7=Res-Fi>Ti-stem-FdO/s=2/L=0.24/S=0.76/Lk=Fi:op0.31/…/op=add_control`. Agents that store each other's current cluster into **ensembles** with canonical names.
+
+**3. The agents tick.** The Agent Mechanics tick law runs on the lattice. An agent offers its stock through the channel matrix `R`, gated by its energy. Receivers store what fits and lose the rest as **Leak**. Leak is split by cause: hostile current (`op`), overdrive (`ov`) and sub-quantum arrivals (`q`). Total reserve is conserved except for intake and Leak, and the test suite checks this to 1e-6. Agents climb ranks (Seed → Res → Cyc → Attr) only through licensed operators paid for with energy.
+
+**4. Three domains, joined by a gauge field.** The engine works in three domains at once:
+
+```text
+   AX  the policy (clauses, moduli, operations)   ← where the problem lives
+    │   link phase A = how faithfully an agent carries its clause's function
+   TC  the table of correspondences                ← the gauge connection
+    │
+   AM  the Agent Mechanics lattice of agents       ← where the laws are explicit
+```
+
+Contradictory clauses carry phase π on their artifact edge. Hostile agents carry phase π on their lattice edge. Around every square (clause → clause → agent → agent), the curvature `B = d₁A` measures whether the correspondences can all hold. Its **frustration** `(1 − cos B)/2` is how the engine detects a **clash**. Curvature is gauge invariant (`A → A + d₀χ` leaves it unchanged), so relabelling cannot create or hide a clash. The tests check this.
+
+**5. Leak drives defence.** An agent whose stability `S = G/(G + Leak)` falls below `S_min` (blended with its clash frustration by `λ_AM`) **heals in the lattice**. It simulates each licensed operator and applies the one that lowers its Leak most:
+
+- `a`: flip attitude
+- `r`: cover the axis complement
+- `ra`: move to the norm axis
+- `σ`: open a stem
+- `cut`: shield a hostile edge
+- `→`: absorb an overload
+
+The **symbolic gauge coderivative** `δ_A` then carries the operator back to the policy as an edit: `r` becomes "cover the complementary function", `cut` becomes "isolate the clashing scope", and so on. The heal is recorded as a **finding**. This is the hyperparameter trick of the design: permutations are searched where the laws are explicit and the search is small (16 stacks, 4 writings, a handful of operators), and the winner is pulled back to the policy.
+
+**6. Stock drives evolution.** An agent whose total reserve grows while it emits (`Δŵ ≥ 0`, energy `x ≥ 1`) has a surplus. It spends it drafting a **control** for the function its operator points to; the local driver phrases it. The control is gated by **posture**: the Shannon diversity of the eight functions across the policy, divided by one plus the number of contradictory clause pairs. If posture rises and no contradiction is added, the control enters the policy and is born as a new agent (a `pr` edge from its payer). Its success flows back as mass intake to the agent that wrote it. If posture does not rise, the control is rolled back.
+
+**7. The loop distils itself into the local model.** Each loop appends its heal and control traces to a JSONL dataset. When the loop measurably improves (fewer reasoning rounds per solve, lower ensemble Leak, or higher posture), the adapter scale is raised one step and **clamped into the local llama.cpp driver** through `POST /lora-adapters`. When the next window does not improve, the scale returns to the last good value. Training runs only if the server sets `RSI_LORA_TRAIN_CMD`. Without an adapter, the same traces act as a distilled memory, so a known heal costs one round. That offline stand-in is what the tests measure. In treatise terms, a LoRA is side mass: stock the loop already paid for, folded into weights, making the most-used routes cheaper.
+
+**8. Space and time.** A covered cell is a (clause, function) pair held by a stable, active agent. The benchmark reports cells covered, reasoning rounds per solve, findings, controls and ensemble Leak for each drive. Faster loops and shorter thinking both widen coverage per unit of time. Coverage means an agent stands for that function. It does not mean the function is secure.
+
+### Drives and sensitivity
+
+| Drive | Intent | `S_min` | `ζ` | heals/loop | controls/loop | `θ` |
+|---|---|---|---|---|---|---|
+| `leak` | **defensive**: heal clashes first | 0.62 | 0.30 | 12 | 2 | 0.20 |
+| `bal` | heal what leaks, evolve where there is surplus | 0.50 | 0.15 | 6 | 4 | 0.30 |
+| `stock` | **evolving**: spend surplus on controls | 0.38 | 0.08 | 3 | 8 | 0.45 |
+
+- **`λ_AM`** (0–1) sets how sensitive the lattice is to the treatise. At `0` decisions follow artifact signals only (clash frustration, mapping confidence). At `1` they follow the Agent Mechanics balance only.
+- Every treatise parameter can be overridden through `sensitivity`. The table below lists them.
+
+| Parameter | Meaning |
+|---|---|
+| `S_min` | storing threshold: below it an agent leaks |
+| `ζ` | damage Leak does to capacity |
+| `θ` | share of stored flux turned into energy |
+| `q` | registration quantum: smaller arrivals are lost |
+| `r_scale`, `r_antisym` | channel strength and one-way conductivity |
+| `energy_intake` | compute budget per agent |
+| `η` | rewriting step, divided by `1 + side mass` |
+
+All values are uncalibrated conventions, as the treatise says of its own ([OG6]).
+
+### Models
+
+- **Driver** (lattice, heals, control drafting) **must be local**: a llama.cpp server on a loopback or private host, or an in-process model. A remote driver is refused, and driver calls never leave the machine.
+- **Mapper** (table of correspondences) may be remote, via OpenRouter. If it is missing, the driver maps, and the run logs that the recommendation was not met.
+- **Offline** (Simulation Mode, `--offline`): the real engine with deterministic heuristics and no model calls.
+
+### Run it
+
+**Web UI:** the **♾️ RSI Loop** tab. Load an example policy, pick a drive, and watch the *Ouroboros Lattice*:
+
+- the loop as a ring with an ingest tail;
+- the policy as an outer band, with red chords between contradictory clauses;
+- the gauge spokes running to the agents;
+- agents in species colours, with red halos when leaking and green when stocking;
+- controls born on the band as they are kept.
+
+Findings, controls, the hardened policy, the correspondences, the LoRA history and the loop log are listed below the canvas.
+
+**CLI:**
+
+```bash
+deepthink rsi --input examples/security/institution_access_policy.txt --drive leak --iterations 3 --offline
+deepthink rsi --input my_policy.md --drive stock --objective "protect finance data" \
+              --driver-url http://localhost:8080/v1 --lora      # local driver, LoRA clamp
+deepthink estimate rsi --iterations 3
+python -m deepthink.nomosloop.benchmark                         # every example × every drive
+```
+
+**Library:**
+
+```python
+import asyncio
+from deepthink import run_rsi
+from deepthink.models import ChatLlamaCpp
+
+async def main():
+    driver = ChatLlamaCpp(base_url="http://localhost:8080/v1", model="local")  # or None offline
+    text = open("examples/security/network_segmentation_standard.txt", encoding="utf-8").read()
+    r = await run_rsi(driver, text, params={"drive": "leak", "iterations": 3,
+                                            "objective": "limit lateral movement"})
+    for f in r["findings"][:3]:
+        print(f["severity"], f["finding"])
+    print(r["posture_baseline"], "->", r["posture_final"], r["artifact_path"])
+
+asyncio.run(main())
+```
+
+**Benchmark** (offline, three loops, `python -m deepthink.nomosloop.benchmark`):
+
+```text
+case                               posture        contra  finds  ctrls    L_G  space    rps
+incident_response_runb/leak       0.618 -> 0.829       0     15      4  0.283      3   2.84
+incident_response_runb/stock      0.618 -> 0.946       0      6     16  0.332     38   0.82
+institution_access_pol/leak       0.245 -> 0.286       2     19      3  0.037      1   2.18
+institution_access_pol/stock      0.245 -> 0.320       2      9     17  0.159     43   0.96
+network_segmentation_s/leak       0.146 -> 0.200       3     13      4  0.149     14   2.41
+network_segmentation_s/stock      0.146 -> 0.232       3      3     15  0.276     47   0.39
+```
+
+Leak-driven runs produce the most findings and the lowest ensemble Leak. Stock-driven runs write the most controls, cover the most cells and need the fewest rounds per solve. In the access policy, the leak drive finds the two contradictions seeded into the example (§2 × §7 and §5 × §8).
+
+### What is measured and what is not
+
+- **Measured:** contradictions found by the parser, posture before and after, conservation of the tick law, gauge invariance, which controls pass the gate, rounds per solve, and the LoRA keep/rollback decisions.
+- **Readings, not measurements:** the mapping of clauses to species, the climate field of names, and every treatise parameter.
+- **Not claimed:** that a higher posture means a safer institution, that findings are complete, or that the LoRA adapter improves your model. Whether a trained adapter helps is for you to evaluate on your own traces.
+
+---
+
+## 🎰 Qualitative Diffusion (QDAD)
 
 **An N×N noun×verb grid: high-temp invent, critic rewrite, then one synthesizer.** Available as:
 
@@ -172,93 +330,9 @@ Replaces Algorithm Design Mode with **Qualitative Diffusion App Designer (QDAD)*
 
 Feed a Midjourney-style app prompt; hand the result to Claude Code, Cursor, Codex, or any agentic coder.
 
-### 4. 🔁 RSI Mode (Recursive Self-Improvement over Formal Artifacts)
+### 4. 🛡 RSI Loop (Recursive Self-Improvement for Cybersecurity)
 
-**A LangGraph-based recursive self-improvement (RSI) engine that turns any formal system into a self-inspecting, self-mutating, scale-aware scaffold.** This is the fourth section: library + CLI, plus a live **♾️ RSI Loop** tab in the web UI.
-
-A *law* is any generative formal system that can produce lesser replicas of itself (instantiations): a physics theory, a legal code, a math model, a code repository, a documentation set. A *scale* (or *base*) is a layered rewrite grammar that lets one compact high-level statement expand into many consistent low-level instances — the way binary encodes decimal, or a zodiac encodes individual charts. RSI recovers those scales from raw text, exposes them as mutable state, and evolves them so each generation spawns **more world per symbol** (higher instantiation capacity).
-
-```
-formal text / PDF
-  → ingest → scale-induction (motifs → LLM-identified bases + moduli)
-  → spawn mutator swarm → inhabit mesh world → fitness by instantiation capacity
-  → runnable artifact → elevate lattice v0 → v1 → repeat
-```
-
-**Why this exists.** Descriptive accuracy is cheap. What matters is **compression + generative power**: one equation that births arbitrarily many consistent worlds (e.g. one 5D vacuum statement → 4D gravity + Maxwell + dilaton + all their charts, gauges, and field configurations). Design rules enforced by the loop:
-
-1. Compression + generativity beats mere description.
-2. Every pattern found in an instantiation becomes eligible for elevation into the higher law.
-3. No descriptive bloat without worldly capacity — rejected mutations leave the lattice untouched.
-4. Everything is a mutation target: graph topology, routing policy, fitness function, artifact generator.
-
-**In the web UI — the Ouroboros Lattice.** The **♾️ RSI Loop** tab draws the run as it happens:
-
-- **The loop** is a ring of the five looping stages (mutate → mesh spawn → fitness → artifact → rectify). `ingest` and `scale induction` spiral into it as a tail, so the graph reads as a serpent eating its tail. A comet marks the active node, and each finished loop leaves a faint echo orbit.
-- **The lattice** is drawn as a mandala inside the ring. The most compact level sits at the centre, and each lower level is a wider ring with rule notches. Mesh instantiations sit on their level's ring, with `expands-to` links running outward. Every node carries orbiting **inhabitant agents**, drawn amber when they were spawned as peers or children.
-- **The mutator swarm** appears as diamonds that are born at *mutate* and judged at *fitness* (green = accepted, red = shed). Accepted ones are absorbed into the core at *rectify*, and a ripple shows whether measured capacity rose.
-- Instrument cards show capacity per lattice version, each level's **base / modulus**, and the scored proposals. Results include the summary, the emitted artifact (downloadable), and the loop log.
-
-**Simulation Mode** (on by default) runs the real engine with its deterministic offline heuristics, so it needs no key. Live events come from `run_rsi_pipeline(..., on_event=fn)`, which is also available to library callers.
-
-**How it works**
-
-1. **State: the lattice is first-class** (`deepthink/nomosloop/state.py`) — `NomosState` carries `tokens`, `motifs`, a versioned `scale_lattice` plus full `lattice_history`, `mutation_proposals` / `accepted_mutations`, a serializable mesh snapshot (`mesh_nodes` / `mesh_edges`), the `inhabitants` and their `spawn_log`, `fitness_report`, `artifact_path` / `artifact_code`, loop counters, and audit trails (`routing_log`, `topology_log`). Each `ScaleLevel` carries the LLM-identified `base` / `base_spec{radix, alphabet, encoding}` (the rewrite radix packing this level into the one below) and `modulus` / `modulus_spec{period, constraint, operator}` (the cycle/wrap/constraint closing the scale).
-2. **Graph: explicit and self-mutable** (`deepthink/nomosloop/graph.py`):
-
-   ```
-   ingest → scale_induction → mutation_proposal → mesh_spawn
-          → fitness → artifact_emit → rectify (⇢ mutation_proposal | END)
-   ```
-
-   Nodes are thin orchestrators; heavy lifting lives in `agents.py` (`AGENT_REGISTRY`). Topology is data: inspect with `describe_topology()`, rewire at runtime with `mutate_topology({"add_edge": [...]})`, rebuild via `build_graph()`.
-3. **Routing: cheap vs frontier** (`deepthink/nomosloop/routing.py`) — `cheap` (tokenise, motif mine, consistency, bulk mutation generation) vs `frontier` (hierarchy synthesis, scale invention, fitness eval, artifact design). In open-deepthink the injected `llm` drives **both** tiers through a bridge; standalone it uses OpenRouter; with no key (or `NOMOSLOOP_OFFLINE=1`) it runs deterministic offline heuristics. Every decision is logged to `routing_log`.
-4. **Bases and moduli are LLM-identified** — the frontier synthesizer is prompted with a strict JSON schema demanding, per level, `base`, `base_spec`, `modulus`, `modulus_spec`, executable `rules`, and an `expansion_map`. The validator is strict: 2–6 levels, each with ≥1 rule and a non-blank `base` *and* `modulus`; a level missing either is rejected (no placeholder invented). Offline or on invalid JSON, a deterministic heuristic fills the same shape so the pipeline never breaks.
-5. **Inhabitants: agents that carry the loop** (`deepthink/nomosloop/inhabitants.py`) — every mesh node is inhabited by one agent holding a minimal seed `{law_id, lattice_version, rule_id, level, generation, budget, offspring}`. It can spawn **peers** (same-level mutated variants) and **children** (lower-level downward expansions). Three guards are non-negotiable: **same-or-down only**, **budget** (each spawn costs 1; at 0 sterile), and **provenance** (every spawn appends a `spawn_log` event and mesh edges).
-6. **Mesh world** (`deepthink/nomosloop/mesh.py`) — no direct agent-to-agent messaging; exchange is blackboard-style through shared state. Distance is **topological, not Euclidean** (hops along `expands-to` edges and hierarchy steps).
-7. **Measured fitness, holdout gate, rollback** (`deepthink/nomosloop/rewrite.py`) — mutations are scored by *executing* the rewrite structure (`enumerate_instances`), never by declared `generative_power`. `measured_capacity = log2(1 + distinct instances) × 10 / log2(10 + description symbols)`. ~1 in 4 mined motifs is held out; mutations must not regress `holdout_coverage`. `rectify` keeps a mutation only if measured capacity does not regress and coverage holds; otherwise it is rolled back and logged. Topology patches apply only if acyclic, referencing known nodes, and the graph still compiles.
-8. **Artifacts are the output** — elegant, runnable, self-contained Python demos (stdlib only) showing the recovered `L3 → L2 → L1 → L0` lattice, executable expansion, capacity accounting, and the elevated rewrite.
-
-**Run it (library):**
-
-```python
-import asyncio
-from deepthink import create_llm, run_rsi
-
-async def main():
-    llm = create_llm()  # or None for deterministic offline heuristics
-    text = open("examples/5d_em_fragment.txt", encoding="utf-8").read()
-    result = await run_rsi(llm, text, law_title="5d-electromagnetism",
-                           params={"iterations": 2, "mutators": 6})
-    print(result["lattice_version"], result["levels"])
-    print(result["final_capacity"], "vs baseline", result["baseline_capacity"])
-    print(result["artifact_path"])
-
-asyncio.run(main())
-```
-
-**CLI (same engine, no browser):**
-
-```bash
-deepthink rsi --input examples/binary_decimal_fragment.txt --iterations 2 --mutators 6
-deepthink rsi --input path/to/code.pdf --iterations 2 --offline      # keyless
-deepthink estimate rsi --iterations 2 --mutators 6                   # call estimate
-python -m deepthink.nomosloop.benchmark examples/binary_decimal_fragment.txt
-```
-
-| Variable | Default | Effect |
-|----------|---------|--------|
-| `OPENROUTER_API_KEY` | — | unset → offline heuristics |
-| `OPENROUTER_CHEAP_MODEL` | `google/gemini-2.0-flash-001` | mechanical tasks |
-| `OPENROUTER_FRONTIER_MODEL` | `anthropic/claude-opus-4.5` | synthesis / fitness / artifacts |
-| `NOMOSLOOP_OFFLINE` | auto (no key → offline) | `1` forces deterministic run |
-| `NOMOSLOOP_MUTATORS` | `6` | gen-0 swarm size (`0` = baseline) |
-| `NOMOSLOOP_ACCEPT` | `5.0` | fitness threshold 0–10 |
-| `NOMOSLOOP_SPAWN_BUDGET` | `2` | spawns granted per inhabitant |
-| `NOMOSLOOP_SPAWN_PEERS` | `2` | peer spawns per cycle |
-| `NOMOSLOOP_SPAWN_CHILDREN_CAP` | `8` | child spawns per cycle |
-
-**Limitations.** `graph/v0` mutators are single-shot functions, not persistent agents with memory; spawn content is deterministic scaffolding (LLM-driven peer-to-peer negotiation is not wired in yet); offline motif mining is regex-based; rewrites execute *structurally* (arbitrary physics notation in `pattern`/`rewrite` is not symbolically checked); ground spaces are capped (`MAX_INSTANCES = 10k`); topology patches take effect on the next `build_graph()`.
+Agent Mechanics agents cover an institution's security policy. Leak-driven runs find and heal contradictions; stock-driven runs evolve the policy with posture-gated controls; a LoRA loop distils every pass into the local driver model. The full mechanism, drives, models and benchmark are in the [RSI section](#-rsi-recursive-self-improvement-for-cybersecurity) at the top.
 
 ---
 
@@ -292,7 +366,7 @@ These artifacts are the real product. The final synthesized answer is a byproduc
 - Clean provider model: only OpenRouter (cloud) and LlamaCpp / llama.cpp server (local).
 - Robust JSON handling, token tracking, streaming logs, RAPTOR indexing, AST+subprocess sandbox, disk-backed sessions, and a pre-run **cost estimator**.
 - Real export/import of QNN state. One `GraphState` (library = web).
-- **RSI** scores mutations by *executing* the rewrite structure (measured instantiation capacity + holdout coverage), not by self-declared scores; rejected mutations are rolled back and logged.
+- **RSI** keeps a control only if the measured posture of the policy rises; the tick law's conservation and the gauge invariance of clash detection are checked in the test suite.
 - Manual mode can grow large if you pass `--yes`; auto mode caps at 24 agents. Estimate first.
 
 ---
@@ -348,11 +422,10 @@ async def main():
             break
     print(len(graph.distilled_data), "QA pairs →", graph.dataset_path)
 
-    # 4) RSI → evolved scale lattice + runnable artifact
-    rsi_text = open("examples/5d_em_fragment.txt", encoding="utf-8").read()
-    rsi = await run_rsi(llm, rsi_text, law_title="5d-electromagnetism",
-                        params={"iterations": 2, "mutators": 6})
-    print(rsi["lattice_version"], rsi["levels"], rsi["final_capacity"])
+    # 4) RSI → findings + hardened policy (driver must be local; None = offline)
+    policy = open("examples/security/institution_access_policy.txt", encoding="utf-8").read()
+    rsi = await run_rsi(None, policy, params={"drive": "leak", "iterations": 2})
+    print(len(rsi["findings"]), "findings; posture", rsi["posture_baseline"], "->", rsi["posture_final"])
 
 asyncio.run(main())
 ```
@@ -362,10 +435,10 @@ asyncio.run(main())
 ```bash
 deepthink qnn  --prompt "Break this deadlock…" --verbose
 deepthink qdad --prompt "cozy night writing app" --n 3 --steps 2
-deepthink rsi  --input examples/binary_decimal_fragment.txt --iterations 2 --mutators 6
+deepthink rsi  --input examples/security/institution_access_policy.txt --drive leak --offline
 deepthink qnn  --prompt "…" --debug          # mock LLM, no API key
 deepthink estimate qnn --layers 2 --width 2 --epochs 1
-deepthink estimate rsi --iterations 2 --mutators 6
+deepthink estimate rsi --iterations 2
 deepthink eval                               # structural checks, mock LLMs
 deepthink version
 ```
@@ -374,7 +447,7 @@ deepthink version
 |-----------|--------|----------------|
 | **QNN** | `from deepthink import run_qnn` | Layered multi-agent epochs + Mirror Descent + self-attention → Solution-Space Report |
 | **QDAD** | `from deepthink import run_qdad` | Noun×verb diffusion grid → buildable App Build Prompt |
-| **RSI** | `from deepthink import run_rsi` | Recursive self-improvement over formal artifacts → evolved scale lattice + runnable artifact |
+| **RSI** | `from deepthink import run_rsi` | Recursive self-improvement for cybersecurity → findings, posture-gated controls, hardened policy, LoRA traces |
 | **Distillation** | `from deepthink import DistillationGraph` | 1×2×2×2×2×2×1 evolutionary topology → dataset + `topology_archive.json` |
 | **Self-attention** | `from deepthink import compute_self_attention` | Qualitative attention over non-local past neurons |
 | **Providers** | `from deepthink import create_llm` | OpenRouter or llama.cpp chat models |
@@ -388,7 +461,7 @@ deepthink/
   providers.py        # create_llm(...)
   qnn/                # brainstorm QNN pipeline
   qdad/               # qualitative diffusion
-  nomosloop/          # RSI engine (state/graph/routing/agents/mesh/rewrite/…)
+  nomosloop/          # RSI engine (mechanics/correspondence/world/security/lora/graph/…)
   distillation/       # evolutionary knowledge distillation
   self_attention.py   # lexical overlap “attention”
   cost.py             # LLM-call / token estimates (no network)

@@ -209,26 +209,35 @@ def estimate_distillation_cost(
 
 def estimate_rsi_cost(
     iterations: int = 1,
-    mutators: int = 6,
+    mutators: int = 8,
     *,
+    clauses: int = 14,
+    drive: str = "bal",
+    cot: bool = True,
     tokens_in: int = DEFAULT_TOKENS_IN,
     tokens_out: int = DEFAULT_TOKENS_OUT,
 ) -> CostEstimate:
-    """Count RSI-loop LLM calls for a given iteration / mutator-swarm size.
+    """Count RSI security-loop LLM calls (upper bound).
 
-    Matches ``deepthink.nomosloop.pipeline.run_rsi_pipeline``:
+    Matches ``deepthink.nomosloop.run_rsi_pipeline``:
 
-    * one-time induction: tokenizer + motif miner + hierarchy synthesizer +
-      consistency checker (4 calls)
-    * per iteration: N mutation proposers + N measured fitness evaluators +
-      1 artifact designer (2N + 1 calls)
-    * mesh spawn / rectify are deterministic (no LLM calls)
+    * ingest: 1 driver call (tokeniser). Policy parsing is deterministic.
+    * correspondence: one mapper call per 16 new policy elements (clauses,
+      moduli and up to ``mutators`` control operations), plus one per loop for
+      the rows of new controls.
+    * per loop: up to ``heal_budget`` heal findings plus ``stock_budget``
+      control drafts on the local driver (when ``cot``). The tick law, the
+      posture gate and the LoRA clamp make no LLM calls.
     """
+    from deepthink.nomosloop.world import DRIVES
+
     iters = max(1, int(iterations))
-    n = max(0, int(mutators))
-    induction = 4
-    per_iter = 2 * n + 1
-    calls = induction + iters * per_iter
+    preset = DRIVES.get(drive, DRIVES["bal"])
+    heal, stock = int(preset["heal_budget"]), int(preset["stock_budget"])
+    elements = max(0, int(clauses)) + 4 + max(0, int(mutators))
+    mapper = -(-elements // 16) + iters
+    driver_loop = (heal + stock) if cot else 0
+    calls = 1 + mapper + iters * driver_loop
     return CostEstimate(
         kind="rsi",
         llm_calls=calls,
@@ -236,19 +245,21 @@ def estimate_rsi_cost(
         est_tokens_out=calls * tokens_out,
         est_tokens_total=calls * (tokens_in + tokens_out),
         breakdown={
-            "induction": induction,
-            "mutation_propose": iters * n,
-            "fitness_eval": iters * n,
-            "artifact_design": iters,
+            "driver_ingest": 1,
+            "mapper_toc": mapper,
+            "driver_heal": iters * (heal if cot else 0),
+            "driver_stock": iters * (stock if cot else 0),
         },
         notes=[
-            "Counts LLM invocations the RSI LangGraph will issue.",
-            "Fitness is measured by executing rewrites; the LLM only audits.",
-            "mutators=0 is the no-mutation baseline (induction + artifact only).",
+            "Upper bound: heals and controls only run for agents that leak or stock.",
+            "Driver calls stay on the local model; only mapper calls may be remote.",
+            "The tick law, posture gate and LoRA clamp make no LLM calls.",
         ],
         topology={
             "iterations": iters,
-            "mutators": n,
-            "per_iteration_calls": per_iter,
+            "mutators": int(mutators),
+            "drive": drive,
+            "heal_budget": heal,
+            "stock_budget": stock,
         },
     )

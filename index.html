@@ -130,38 +130,110 @@
         </div>
     </div>
 
-    <!-- RSI Loop Mode Container (recursive self-improvement over formal artifacts) -->
+    <!-- RSI Loop Mode Container (recursive self-improvement for cybersecurity) -->
     <div class="container rsi-container hidden" id="rsi-mode">
         <div class="section">
-            <h2 class="rsi-section-title">♾️ RSI Loop <small>recursive self-improvement over formal artifacts</small></h2>
+            <h2 class="rsi-section-title">♾️ RSI Loop <small>recursive self-improvement for cybersecurity · Agent Mechanics over your security policy</small></h2>
             <form id="rsi-form">
                 <div class="rsi-examples" id="rsi-examples">
                     <span class="app-hint">Load an example:</span>
                 </div>
-                <label for="rsi-text">Formal artifact — a law, spec, math/physics model, or code docs</label>
-                <textarea id="rsi-text" class="rsi-artifact-input" placeholder="Paste any generative formal system: definitions, rules, equations, a module's docs…" required></textarea>
+                <label for="rsi-text">Security policy, runbook or standard</label>
+                <textarea id="rsi-text" class="rsi-artifact-input" placeholder="Paste numbered clauses (§1, 1., 2.1) grouped under headers such as PRINCIPLES, ACCESS, CONTROLS, ASSETS…" required></textarea>
 
                 <div class="app-control-row">
                     <div class="rsi-field">
-                        <label for="rsi-title">Law title</label>
-                        <input type="text" id="rsi-title" class="app-input--compact" style="width: 200px !important;" value="rsi-artifact">
+                        <label for="rsi-title">Policy title</label>
+                        <input type="text" id="rsi-title" class="app-input--compact" style="width: 220px !important;" value="policy">
                     </div>
-                    <div class="rsi-field">
-                        <label for="rsi-iterations">Loops</label>
-                        <input type="number" id="rsi-iterations" class="app-input--compact app-input--narrow" value="2" min="1" max="8">
-                    </div>
-                    <div class="rsi-field">
-                        <label for="rsi-mutators">Mutators / loop</label>
-                        <input type="number" id="rsi-mutators" class="app-input--compact app-input--narrow" value="6" min="0" max="24">
-                    </div>
-                    <div class="app-control-group" style="align-self: flex-end; padding-bottom: 0.4rem;">
-                        <input type="checkbox" id="rsi-offline" checked>
-                        <label for="rsi-offline" title="Runs the real RSI engine with its deterministic offline heuristics. No API key or network calls.">🚀 Simulation Mode (Offline engine — No Cost)</label>
+                    <div class="rsi-field rsi-field--grow">
+                        <label for="rsi-objective">Security objective (guides findings and controls)</label>
+                        <input type="text" id="rsi-objective" class="app-input--compact" style="width: 100% !important;" placeholder="e.g. protect finance data from insider misuse">
                     </div>
                 </div>
+
+                <div class="app-subpanel">
+                    <div class="app-subpanel__title">Drive</div>
+                    <div class="rsi-drive" role="group" aria-label="Drive">
+                        <button type="button" class="mode-tab" data-rsi-drive="leak">🛡 Leak · defensive</button>
+                        <button type="button" class="mode-tab active" data-rsi-drive="bal">⚖ Balanced</button>
+                        <button type="button" class="mode-tab" data-rsi-drive="stock">🌱 Stock · evolving</button>
+                    </div>
+                    <div class="app-hint" id="rsi-drive-hint"></div>
+                    <div class="app-control-row" style="margin-top: 0.75rem; margin-bottom: 0;">
+                        <div class="rsi-field">
+                            <label for="rsi-iterations">Loops</label>
+                            <input type="number" id="rsi-iterations" class="app-input--compact app-input--narrow" value="2" min="1" max="8">
+                        </div>
+                        <div class="rsi-field">
+                            <label for="rsi-ticks">Ticks / loop</label>
+                            <input type="number" id="rsi-ticks" class="app-input--compact app-input--narrow" value="3" min="1" max="10">
+                        </div>
+                        <div class="rsi-field">
+                            <label for="rsi-mutators">Control agents</label>
+                            <input type="number" id="rsi-mutators" class="app-input--compact app-input--narrow" value="8" min="0" max="16">
+                        </div>
+                        <div class="rsi-field rsi-field--grow">
+                            <label for="rsi-lambda">λ_AM · sensitivity to Agent Mechanics <b id="rsi-lambda-v"></b></label>
+                            <input type="range" id="rsi-lambda" min="0" max="1" step="0.05" value="0.7" class="rsi-range">
+                            <span class="app-hint">0 = artifact signals only (clashes, confidence) · 1 = the lattice balance only</span>
+                        </div>
+                    </div>
+                    <details class="rsi-details">
+                        <summary>Agent Mechanics parameters <span class="app-hint">(defaults follow the drive)</span></summary>
+                        <div class="rsi-sliders">
+                            <label class="rsi-slider">S<sub>min</sub> storing threshold <b id="rsi-s-s_min-v"></b><input type="range" id="rsi-s-s_min" min="0.1" max="0.9" step="0.01" value="0.5"></label>
+                            <label class="rsi-slider">ζ damage Leak does <b id="rsi-s-zeta-v"></b><input type="range" id="rsi-s-zeta" min="0" max="0.8" step="0.01" value="0.15"></label>
+                            <label class="rsi-slider">θ transduction to energy <b id="rsi-s-theta_p-v"></b><input type="range" id="rsi-s-theta_p" min="0" max="0.9" step="0.01" value="0.3"></label>
+                            <label class="rsi-slider">q registration quantum <b id="rsi-s-q-v"></b><input type="range" id="rsi-s-q" min="0" max="0.2" step="0.005" value="0.02"></label>
+                            <label class="rsi-slider">R channel scale <b id="rsi-s-r_scale-v"></b><input type="range" id="rsi-s-r_scale" min="0.02" max="0.4" step="0.01" value="0.1"></label>
+                        </div>
+                        <button type="button" id="rsi-reset-sens" class="app-btn--ghost">Reset to drive defaults</button>
+                    </details>
+                </div>
+
+                <div class="app-split">
+                    <div class="app-subpanel app-split__pane">
+                        <div class="app-subpanel__title">Models</div>
+                        <p class="app-hint" style="margin-bottom: 0.5rem;"><b>Driver</b> (lattice, heals, controls) is always local: the llama.cpp server set at the top. <b>Mapper</b> (table of correspondences) uses OpenRouter when an API key is set; otherwise the driver maps.</p>
+                        <div class="app-control-row" style="margin-bottom: 0;">
+                            <div class="rsi-field rsi-field--grow">
+                                <label for="rsi-mapper-model">Mapper model (recommended: ARC-AGI-2 &gt; 70)</label>
+                                <input type="text" id="rsi-mapper-model" class="app-input--compact" style="width: 100% !important;" placeholder="openrouter model id">
+                            </div>
+                            <div class="rsi-field">
+                                <label for="rsi-mapper-arc">Declared ARC-AGI-2</label>
+                                <input type="number" id="rsi-mapper-arc" class="app-input--compact app-input--medium" min="0" max="100" step="0.1" placeholder="%">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="app-subpanel app-split__pane">
+                        <div class="app-subpanel__title">LoRA loop</div>
+                        <div class="app-control-group" style="margin-bottom: 0.5rem;">
+                            <input type="checkbox" id="rsi-lora-on">
+                            <label for="rsi-lora-on">Clamp the adapter into the local driver when the loop improves</label>
+                        </div>
+                        <div class="app-control-row" style="margin-bottom: 0.25rem;">
+                            <div class="rsi-field">
+                                <label for="rsi-lora-id">Adapter id</label>
+                                <input type="number" id="rsi-lora-id" class="app-input--compact app-input--narrow" value="0" min="0" max="64">
+                            </div>
+                            <div class="rsi-field">
+                                <label for="rsi-lora-max">Clamp max</label>
+                                <input type="number" id="rsi-lora-max" class="app-input--compact app-input--narrow" value="1" min="0" max="2" step="0.05">
+                            </div>
+                        </div>
+                        <span class="app-hint">The trace dataset is always written. Training runs only if the server sets RSI_LORA_TRAIN_CMD.</span>
+                    </div>
+                </div>
+
                 <div class="app-control-row" style="margin-bottom: 0;">
-                    <label for="rsi-file-input" class="app-file-label">📄 Load file</label>
-                    <input type="file" id="rsi-file-input" accept=".txt,.md,.py,.tex,.rst,.json,.yaml,.yml,.toml" style="display: none;">
+                    <div class="app-control-group">
+                        <input type="checkbox" id="rsi-offline" checked>
+                        <label for="rsi-offline" title="Runs the real engine with deterministic offline heuristics. No model calls.">🚀 Simulation Mode (offline engine, no model calls)</label>
+                    </div>
+                    <label for="rsi-file-input" class="app-file-label">📄 Load policy file</label>
+                    <input type="file" id="rsi-file-input" accept=".txt,.md,.rst,.yaml,.yml,.json" style="display: none;">
                     <span id="rsi-status" class="app-status"></span>
                 </div>
                 <div class="app-action-row" style="margin-top: 1rem;">
@@ -177,31 +249,37 @@
 
         <div class="rsi-instruments">
             <div class="rsi-card">
-                <div class="rsi-card__title">Instantiation capacity <b id="rsi-cap-instances"></b></div>
-                <div id="rsi-capacity"><span class="rsi-empty">Measured per lattice version.</span></div>
+                <div class="rsi-card__title">Posture <b id="rsi-posture-version"></b></div>
+                <div id="rsi-posture"><span class="rsi-empty">Function diversity over contradictory clause pairs, per policy version.</span></div>
             </div>
             <div class="rsi-card">
-                <div class="rsi-card__title">Scale lattice <b id="rsi-lattice-version"></b></div>
-                <div class="rsi-levels" id="rsi-levels"><span class="rsi-empty">Induced from mined motifs.</span></div>
+                <div class="rsi-card__title">Security functions <b>species share</b></div>
+                <div class="rsi-functions" id="rsi-functions"><span class="rsi-empty">How the policy spreads over the eight functions.</span></div>
             </div>
             <div class="rsi-card">
-                <div class="rsi-card__title">Mutator swarm <b id="rsi-swarm-count"></b></div>
-                <div class="rsi-swarm" id="rsi-swarm"><span class="rsi-empty">Proposals are scored by measured capacity.</span></div>
+                <div class="rsi-card__title">Agents &amp; ensembles <b id="rsi-agents-count"></b></div>
+                <div id="rsi-agents"><span class="rsi-empty">One agent per clause, modulus and control operation.</span></div>
             </div>
         </div>
 
         <div class="section hidden" id="rsi-results">
             <div class="header-with-button">
-                <h2>Evolved Law</h2>
-                <button type="button" id="rsi-download-btn" class="app-btn--secondary">⬇ Download artifact</button>
+                <h2>Results</h2>
+                <button type="button" id="rsi-download-btn" class="app-btn--secondary">⬇ Download report</button>
             </div>
             <div class="rsi-result-tabs">
-                <button type="button" class="mode-tab active" data-rsi-pane="summary">Summary</button>
-                <button type="button" class="mode-tab" data-rsi-pane="artifact">Artifact</button>
+                <button type="button" class="mode-tab active" data-rsi-pane="findings">🛡 Findings<span id="rsi-tab-findings-n"></span></button>
+                <button type="button" class="mode-tab" data-rsi-pane="controls">🌱 Controls<span id="rsi-tab-controls-n"></span></button>
+                <button type="button" class="mode-tab" data-rsi-pane="report">Hardened policy</button>
+                <button type="button" class="mode-tab" data-rsi-pane="toc">Correspondences</button>
+                <button type="button" class="mode-tab" data-rsi-pane="lora">LoRA</button>
                 <button type="button" class="mode-tab" data-rsi-pane="looplog">Loop log</button>
             </div>
-            <div class="rsi-result-pane" data-rsi-pane-body="summary"><div class="rsi-summary" id="rsi-summary"></div></div>
-            <div class="rsi-result-pane rsi-artifact hidden" data-rsi-pane-body="artifact"><pre><code id="rsi-artifact-code" class="language-python"></code></pre></div>
+            <div class="rsi-result-pane" data-rsi-pane-body="findings"><div id="rsi-findings"></div></div>
+            <div class="rsi-result-pane hidden" data-rsi-pane-body="controls"><div id="rsi-controls"></div></div>
+            <div class="rsi-result-pane hidden" data-rsi-pane-body="report"><div class="rsi-summary" id="rsi-report"></div></div>
+            <div class="rsi-result-pane hidden" data-rsi-pane-body="toc"><div id="rsi-toc" class="rsi-table-wrap"></div></div>
+            <div class="rsi-result-pane hidden" data-rsi-pane-body="lora"><div id="rsi-lora"></div></div>
             <div class="rsi-result-pane hidden" data-rsi-pane-body="looplog"><div class="rsi-looplog" id="rsi-looplog"></div></div>
         </div>
     </div>
@@ -624,9 +702,9 @@
         const startDistillationBtn = document.getElementById('start-distillation-btn');
 
         // --- Mode Switching Logic ---
-        document.querySelectorAll('.mode-tab').forEach(tab => {
+        document.querySelectorAll('.mode-tabs > .mode-tab').forEach(tab => {
             tab.addEventListener('click', () => {
-                document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.mode-tabs > .mode-tab').forEach(t => t.classList.remove('active'));
                 tab.classList.add('active');
 
                 // Re-fetch elements to be safe
@@ -1263,7 +1341,7 @@
         });
 
         // Mode switching and API key elements
-        const modeTabs = document.querySelectorAll('.mode-tab');
+        const modeTabs = document.querySelectorAll('.mode-tabs > .mode-tab');
         const appSlotMachineMode = document.getElementById('app-slot-machine-mode');
         const brainstormMode = document.getElementById('brainstorm-mode');
         const saveApiKeyBtn = document.getElementById('save-api-key-btn');

@@ -193,17 +193,26 @@ class Settings(BaseSettings):
     distillation_token_budget: int = Field(default=500_000, ge=1)
     distillation_output_dir: str = Field(default="distillation_output")
 
-    # --- RSI (recursive self-improvement over formal artifacts) defaults ---
-    rsi_iterations: int = Field(default=1, ge=1)
-    rsi_mutators: int = Field(default=6, ge=0)
+    # --- RSI (recursive self-improvement for cybersecurity) defaults ---
+    rsi_iterations: int = Field(default=2, ge=1)
+    rsi_mutators: int = Field(default=8, ge=0)
     rsi_offline: bool = Field(default=False)
     rsi_artifact_dir: str = Field(default="artifacts")
-    rsi_cheap_model: str = Field(default="google/gemini-2.0-flash-001")
-    rsi_frontier_model: str = Field(default="anthropic/claude-opus-4.5")
-    rsi_accept_threshold: float = Field(default=5.0, ge=0.0, le=10.0)
-    rsi_spawn_budget: int = Field(default=2, ge=0)
-    rsi_spawn_peers: int = Field(default=2, ge=0)
-    rsi_spawn_children_cap: int = Field(default=8, ge=0)
+    rsi_drive: str = Field(default="bal", description="leak (defensive) | stock (evolving) | bal")
+    rsi_lambda_am: float = Field(default=0.7, ge=0.0, le=1.0)
+    rsi_ticks_per_loop: int = Field(default=3, ge=1, le=20)
+    rsi_mapper_model: str = Field(
+        default="anthropic/claude-opus-4.5",
+        description="Mapper for the table of correspondences (recommended: ARC-AGI-2 > 70)",
+    )
+    rsi_mapper_arc_agi2: float | None = Field(
+        default=None, description="Declared ARC-AGI-2 score of the mapper"
+    )
+    rsi_lora_train_cmd: str = Field(
+        default="",
+        validation_alias=AliasChoices("RSI_LORA_TRAIN_CMD", "rsi_lora_train_cmd"),
+        description="Server-side LoRA trainer command ({dataset} {out_dir} {run_id}); never taken from the web UI",
+    )
 
     # --- Paths / state ---
     open_deepthink_root: str | None = Field(
@@ -277,6 +286,11 @@ class Settings(BaseSettings):
             "mutators": self.rsi_mutators,
             "offline": self.rsi_offline,
             "artifact_dir": self.rsi_artifact_dir,
+            "drive": self.rsi_drive,
+            "lambda_am": self.rsi_lambda_am,
+            "ticks_per_loop": self.rsi_ticks_per_loop,
+            "mapper_model": self.rsi_mapper_model,
+            "mapper_arc_agi2": self.rsi_mapper_arc_agi2,
         }
 
     def provider_defaults(self) -> dict[str, Any]:

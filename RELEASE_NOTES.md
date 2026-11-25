@@ -1,3 +1,31 @@
+# Release Notes — Unreleased
+
+**Tagline:** "RSI for cybersecurity on Agent Mechanics"
+
+### RSI: recursive self-improvement for cybersecurity
+* The RSI section now targets an institution's **security policies** (policies, runbooks, standards); agentic coding is out of scope
+* New Agent Mechanics engine (`deepthink/nomosloop/mechanics.py`): species, Klein group, the 16 valid stacks, channel matrix, offer/flux/Leak by cause, tick law with energy and transduction, ranks and NX-1 names
+* Table of correspondences and gauge connection (`correspondence.py`): link phases, curvature, frustration (clash), gauge transformations, symbolic coderivative `δ_A`
+* Three-domain world (`world.py`): one agent per clause, modulus and viable control operation; typed edges, circuits, ensembles with canonical strings; heal by licensed operators
+* Leak/stock loop (`graph.py`): `correspond → tick → heal → stock → lora`; findings on heal, posture-gated controls on stock; hardened-policy report and NX-1 log on emit
+* Policy parser and posture (`security.py`); drives `leak` / `bal` / `stock`, `λ_AM`, and per-parameter sensitivity
+* Model roles: the driver must be local (llama.cpp or in-process; remote drivers are refused); the mapper may be remote, with a recommended ARC-AGI-2 > 70 that is declared, not verified
+* LoRA loop (`lora.py`): chat-format trace dataset, optional server-side trainer (`RSI_LORA_TRAIN_CMD`), keep/rollback clamp through llama.cpp `POST /lora-adapters`
+* Web UI: the RSI Loop tab shows the three domains (policy band, gauge spokes, agent lattice) with findings, controls, correspondences, LoRA history and loop log
+* Fixed: buttons inside a mode panel that reused the `mode-tab` class could switch the whole app to a blank mode
+* Removed: the mesh/inhabitants engine, mutation swarm, runtime topology rewiring, and the physics examples (replaced by `examples/security/`)
+
+### Docs
+* `docs/Agent_Mechanics_Treatise_EN.pdf`: the treatise with the NX-1 complement as an appendix (`scripts/append_nx1_to_treatise.py` rebuilds it)
+* `docs/NOMENCLATURE_COMPLEMENT.md`: assessment of the treatise's nomenclature and the NX-1 complement
+* README: RSI is the headline section, with the mechanism, drives, models, benchmark and limits
+
+### Tests
+* `tests/phase_rsi.py` rewritten (10 checks): Part I encounter masses, conservation of the total reserve, the Leak bound, gauge invariance, parser and seeded contradictions, drive behaviour, local-driver rule, LoRA clamp, event stream
+* `python -m deepthink.nomosloop.benchmark` reports every example under every drive and fails on any posture regression
+
+---
+
 # Release Notes — `0.3.0`
 
 **Tag:** `0.3.0`

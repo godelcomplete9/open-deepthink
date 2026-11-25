@@ -1,6 +1,7 @@
 import asyncio
 import io
 import json
+import os
 import random
 import re
 import time
@@ -1699,55 +1700,60 @@ async def download_distillation():
     )
 
 
-# ── RSI loop (fourth section) ────────────────────────────────────────────────
+# ── RSI loop (fourth section: cybersecurity) ─────────────────────────────────
 # Live node events are pushed onto the SSE log stream as
 #   RSI_EVENT: {"type": "rsi_event", "phase", "node", "iteration", "log", "state"}
 # and the final result as
 #   RSI_EVENT: {"type": "rsi_complete", "result": {...}}
 
 active_rsi_task: asyncio.Task | None = None
-_RSI_EXAMPLES_DIR = "examples"
-_RSI_MAX_CHARS = 400_000
+_RSI_EXAMPLES_DIR = os.path.join("examples", "security")
+_RSI_MAX_CHARS = 200_000
+# Sensitivity knobs the UI may override, with their allowed ranges.
+_RSI_SENSITIVITY = {
+    "s_min": (0.05, 0.95),
+    "zeta": (0.0, 1.0),
+    "theta_p": (0.0, 0.9),
+    "q": (0.0, 0.5),
+    "r_scale": (0.01, 1.0),
+    "r_antisym": (-1.0, 1.0),
+    "energy_intake": (0.0, 5.0),
+    "eta": (0.05, 2.0),
+}
 
 
-def _build_rsi_llm(payload: dict):
-    """Chat model for RSI sub-agents, or None for the keyless offline engine."""
+def _build_rsi_models(payload: dict):
+    """(driver, mapper) for the RSI loop. The driver is always the local llama.cpp server."""
+    from deepthink.nomosloop.routing import is_local_url
+
     if payload.get("offline"):
-        return None
-    provider = payload.get("provider", "openrouter")
-    if provider == "openrouter":
-        api_key = payload.get("api_key", "")
-        if not api_key:
-            raise ValueError("OpenRouter API key required (or enable Simulation Mode).")
-        model = (
-            payload.get("synthesis_model", "").strip()
-            or payload.get("openrouter_model", "").strip()
-            or "stepfun/step-3.5-flash:free"
-        )
-        return ChatOpenAI(
-            model=model,
-            openai_api_key=api_key,
+        return None, None
+    url = str(payload.get("llamacpp_url") or get_settings().normalize_llamacpp_url()).rstrip("/")
+    url = url.replace("/chat/completions", "")
+    if not is_local_url(url):
+        raise ValueError(f"The RSI driver must be local; {url!r} is not a local or private host.")
+    driver = ChatLlamaCpp(
+        base_url=url,
+        api_key="no-key-required",
+        model=payload.get("llamacpp_model") or get_settings().llamacpp_model,
+        temperature=0.3,
+        max_tokens=1024,
+    )
+    mapper = None
+    key = str(payload.get("api_key") or "")
+    if key:
+        mapper = ChatOpenAI(
+            model=str(payload.get("mapper_model") or get_settings().rsi_mapper_model),
+            openai_api_key=key,
             openai_api_base="https://openrouter.ai/api/v1",
-            temperature=0.4,
+            temperature=0.2,
         )
-    if provider == "llamacpp":
-        url = str(payload.get("llamacpp_url", "http://localhost:8080/v1")).rstrip("/")
-        url = url.replace("/chat/completions", "")
-        return ChatLlamaCpp(
-            base_url=url,
-            api_key="no-key-required",
-            model=payload.get("llamacpp_model", "llama-3.2-1b-instruct"),
-            temperature=0.4,
-            max_tokens=4096,
-        )
-    raise ValueError("Invalid provider. Please select openrouter or llamacpp.")
+    return driver, mapper
 
 
 @app.get("/rsi_examples")
 async def rsi_examples():
-    """Bundled formal fragments the RSI tab can load as a starting artifact."""
-    import os
-
+    """Bundled security policies the RSI tab can load."""
     out = []
     if os.path.isdir(_RSI_EXAMPLES_DIR):
         for name in sorted(os.listdir(_RSI_EXAMPLES_DIR)):
@@ -1760,7 +1766,7 @@ async def rsi_examples():
 
 @app.post("/start_rsi")
 async def start_rsi(payload: dict = Body(...)):
-    """Start one RSI run in the background; progress streams over /stream_log."""
+    """Start one RSI security run in the background; progress streams over /stream_log."""
     global active_rsi_task
     from deepthink.nomosloop import run_rsi_pipeline
 
@@ -1769,22 +1775,44 @@ async def start_rsi(payload: dict = Body(...)):
 
     text = str(payload.get("text", "") or "")
     if not text.strip():
-        return JSONResponse(status_code=400, content={"message": "Paste a formal artifact first."})
+        return JSONResponse(status_code=400, content={"message": "Paste a security policy first."})
     if len(text) > _RSI_MAX_CHARS:
         return JSONResponse(
             status_code=400,
-            content={"message": f"Artifact too large ({len(text):,} > {_RSI_MAX_CHARS:,} chars)."},
+            content={"message": f"Policy too large ({len(text):,} > {_RSI_MAX_CHARS:,} chars)."},
         )
     try:
         iterations = max(1, min(8, int(payload.get("iterations", 2))))
-        mutators = max(0, min(24, int(payload.get("mutators", 6))))
+        mutators = max(0, min(16, int(payload.get("mutators", 8))))
+        ticks = max(1, min(10, int(payload.get("ticks", 3))))
+        lambda_am = max(0.0, min(1.0, float(payload.get("lambda_am", 0.7))))
+        sens = {}
+        for k, (lo, hi) in _RSI_SENSITIVITY.items():
+            if (payload.get("sensitivity") or {}).get(k) is not None:
+                sens[k] = max(lo, min(hi, float(payload["sensitivity"][k])))
+        arc = payload.get("mapper_arc_agi2")
+        arc = None if arc in (None, "") else max(0.0, min(100.0, float(arc)))
+        lora_in = payload.get("lora") or {}
+        lora = {
+            "enabled": bool(lora_in.get("enabled")),
+            "adapter_id": max(0, min(64, int(lora_in.get("adapter_id", 0)))),
+            "clamp_max": max(0.0, min(2.0, float(lora_in.get("clamp_max", 1.0)))),
+            # the trainer command comes from server settings only, never from the request
+            "train_cmd": get_settings().rsi_lora_train_cmd,
+        }
     except (TypeError, ValueError):
-        return JSONResponse(status_code=400, content={"message": "Invalid iterations/mutators."})
-    title = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(payload.get("law_title") or "rsi-artifact"))[:60]
+        return JSONResponse(status_code=400, content={"message": "Invalid numeric parameter."})
+    drive = str(payload.get("drive") or "bal")
+    if drive not in ("leak", "stock", "bal"):
+        return JSONResponse(
+            status_code=400, content={"message": "drive must be leak, stock or bal."}
+        )
+    title = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(payload.get("law_title") or "policy"))[:60]
     offline = bool(payload.get("offline", False))
+    objective = str(payload.get("objective") or "")[:400]
 
     try:
-        llm = _build_rsi_llm(payload)
+        driver, mapper = _build_rsi_models(payload)
     except Exception as e:  # noqa: BLE001
         return JSONResponse(status_code=400, content={"message": str(e)})
 
@@ -1802,30 +1830,32 @@ async def start_rsi(payload: dict = Body(...)):
 
     async def _run() -> None:
         global active_rsi_task
-        from deepthink.nomosloop import describe_topology, set_topology
-
-        # TOPOLOGY is a process-global the loop may rewire. A CLI run gets a
-        # fresh process; give each web run the same clean slate so one run's
-        # accepted rewire (e.g. entry -> scale_induction) can't silently skip
-        # ingest in the next.
-        topo_before = describe_topology()
         try:
             result = await run_rsi_pipeline(
-                llm,
+                driver,
                 text,
                 law_title=title,
                 iterations=iterations,
                 mutators=mutators,
-                artifact_path=f"artifacts/artifact_rsi_{title}_{uuid.uuid4().hex[:6]}.py",
-                params={"offline": offline},
+                artifact_path=os.path.join("artifacts", f"rsi_{title}_{uuid.uuid4().hex[:6]}.md"),
+                params={
+                    "offline": offline,
+                    "drive": drive,
+                    "lambda_am": lambda_am,
+                    "ticks_per_loop": ticks,
+                    "sensitivity": sens,
+                    "objective": objective,
+                    "mapper_arc_agi2": arc,
+                    "lora": lora,
+                },
                 log=_log,
                 on_event=_on_event,
+                mapper_llm=mapper,
             )
             _emit({"type": "rsi_complete", "result": result})
         except Exception as e:  # noqa: BLE001
             _emit({"type": "rsi_complete", "result": {"mode": "rsi", "error": str(e)}})
         finally:
-            set_topology(topo_before)
             active_rsi_task = None
 
     active_rsi_task = asyncio.create_task(_run())
@@ -1833,8 +1863,12 @@ async def start_rsi(payload: dict = Body(...)):
         "status": "started",
         "law_title": title,
         "iterations": iterations,
-        "mutators": mutators,
+        "drive": drive,
+        "lambda_am": lambda_am,
         "offline": offline,
+        "mapper": "openrouter"
+        if mapper is not None
+        else ("offline" if offline else "driver-fallback"),
     }
 
 

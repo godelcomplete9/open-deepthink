@@ -1,26 +1,24 @@
 """Top-level LangGraph state schema for the RSI section.
 
-Ontology:
+Ontology (see docs/NOMENCLATURE_COMPLEMENT.md):
 - law: any generative formal system producing lesser replicas (instantiations).
 - scale / base: layered rewrite grammar letting a compact high-level statement
   expand into many consistent low-level instances (binary->decimal, zodiac->charts).
-- lattice: versioned, first-class, mutable ScaleLattice in state.
-- mesh: world-graph of lesser/higher instantiations that agents inhabit.
+- three domains: AX (the artifact: the policy lattice and its control
+  operations), TC (the table of correspondences) and AM (the Agent Mechanics
+  lattice of agents).
 
-The graph topology, routing policy, fitness fn, and artifact generators are
-all legitimate RSI mutation targets — hence everything is explicit data.
-
-This is the fourth open-deepthink section: RSI over formal artifacts (code
-repos, math models, physics models, documentation) that follow formal
-structures. Library, CLI, and the web UI "RSI Loop" tab.
+The fourth open-deepthink section: RSI for cybersecurity, over an
+institution's security policies. Library, CLI, and the web UI "RSI Loop" tab.
 """
 
 from __future__ import annotations
 
 import hashlib
+import operator
 import time
 import uuid
-from typing import Any, TypedDict
+from typing import Annotated, Any, TypedDict
 
 LATTICE_VERSION = "lattice/v0"
 
@@ -88,28 +86,6 @@ class MutationProposal(TypedDict, total=False):
     author_agent: str
 
 
-class InstantiationRecord(TypedDict, total=False):
-    id: str
-    scale_level: str
-    content: dict[str, Any]  # concrete low-level instance data
-    parent_law_hash: str
-    parent_rule: str
-    fitness: float
-    children_ids: list[str]
-
-
-class InhabitantRecord(TypedDict, total=False):
-    id: str  # agent id, e.g. "inh-<node8>"
-    node_id: str  # mesh node this agent inhabits
-    level: str  # scale level of its node (L3..L0)
-    rule_id: str  # rule it embodies
-    law_id: str
-    lattice_version: str  # loop seed: which lattice version it carries
-    generation: int  # 0 = mesh-spawned, +1 per spawn hop
-    budget: int  # remaining spawns it may perform
-    offspring: list[str]  # child inhabitant ids it spawned
-
-
 class NomosState(TypedDict, total=False):
     # identity
     run_id: str
@@ -117,34 +93,32 @@ class NomosState(TypedDict, total=False):
     law_title: str
     raw_text: str
     law_hash: str
-    # pipeline products
+    # artifact domain (AX): the security policy and its scale lattice
     tokens: list[str]
     motifs: list[Motif]
     scale_lattice: ScaleLattice
-    lattice_history: list[ScaleLattice]  # every version, inspectable
-    holdout_motifs: list[Motif]  # held out from induction; coverage gate
-    capacity_history: list[dict[str, Any]]  # measured capacity per lattice version
-    baseline_capacity: float  # measured capacity of the induced v0
-    rollbacks: list[dict[str, Any]]  # elevations/topology patches undone
-    topology_history: list[dict[str, Any]]  # topology patches the loop attempted
-    mutation_proposals: list[MutationProposal]
-    accepted_mutations: list[MutationProposal]
-    # mesh world (serializable snapshot; live MeshWorld rebuilt from it)
-    mesh_nodes: list[InstantiationRecord]
-    mesh_edges: list[list[str]]  # [src, dst, relation]
-    inhabitants: list[InhabitantRecord]  # loop-carrying agents inhabiting mesh nodes
-    spawn_log: list[dict[str, Any]]  # every peer/child instantiation event
-    fitness_report: dict[str, Any]
+    lattice_history: list[ScaleLattice]  # every policy version, inspectable
+    posture_history: list[dict[str, Any]]  # measured posture per policy version
+    controls: list[dict[str, Any]]  # controls kept by the posture gate
+    rollbacks: list[dict[str, Any]]  # controls the gate refused
+    ops_by_ref: dict[str, dict[str, Any]]  # viable control operations by AX ref
+    # lattice (AM) + correspondence (TC): the live three-domain world
+    world: Any
+    # LoRA loop
+    lora_cfg: dict[str, Any]
+    lora_state: Any
+    lora_buffer: list[dict[str, Any]]
     # artifact
     artifact_path: str
     artifact_code: str
+    nx1_path: str
     # loop control
     iteration: int
     max_iterations: int
-    n_mutators: int  # gen-0 swarm size for this run (overrides env default)
+    rsi_cfg: dict[str, Any]  # drive, lambda_am, sensitivity, budgets, objective
     # inspectability
     routing_log: list[dict[str, Any]]
-    topology_log: list[str]
+    topology_log: Annotated[list[str], operator.add]  # each node appends its line
     errors: list[str]
 
 
@@ -153,7 +127,7 @@ def hash_text(text: str) -> str:
 
 
 def new_run_state(
-    raw_text: str, law_title: str = "untitled-law", max_iterations: int = 1
+    raw_text: str, law_title: str = "untitled-policy", max_iterations: int = 1
 ) -> NomosState:
     return NomosState(
         run_id=f"run-{uuid.uuid4().hex[:8]}",
@@ -173,23 +147,20 @@ def new_run_state(
             created_at=time.time(),
         ),
         lattice_history=[],
-        holdout_motifs=[],
-        capacity_history=[],
-        baseline_capacity=0.0,
+        posture_history=[],
+        controls=[],
         rollbacks=[],
-        topology_history=[],
-        mutation_proposals=[],
-        accepted_mutations=[],
-        mesh_nodes=[],
-        mesh_edges=[],
-        inhabitants=[],
-        spawn_log=[],
-        fitness_report={},
+        ops_by_ref={},
+        world=None,
+        lora_cfg={},
+        lora_state=None,
+        lora_buffer=[],
         artifact_path="",
         artifact_code="",
+        nx1_path="",
         iteration=0,
         max_iterations=max_iterations,
-        n_mutators=-1,  # -1 => use graph.N_MUTATORS_GEN0 (env default)
+        rsi_cfg={},
         routing_log=[],
         topology_log=[],
         errors=[],
