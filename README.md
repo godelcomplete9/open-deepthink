@@ -13,7 +13,7 @@ Most agentic systems give you breadth through parallelism. open-deepthink gives 
 
 This is a **structured multi-agent loop**: layered LLM calls, lexical retrieval of past cells, prompt rewrite between epochs, and JSON traces. Neural-net words (Mirror Descent, self-attention, diffusion) are a **design language**. They are not those algorithms. Output quality versus a single long prompt is **unevaluated**. See [`docs/DESIGN_NOTES.md`](./docs/DESIGN_NOTES.md) and [`docs/EVAL.md`](./docs/EVAL.md).
 
-A fourth, **API-only** mode — **RSI** — applies recursive self-improvement to formal artifacts (code repositories, math models, physics models, documentation): it induces a scale lattice, mutates it under a measured-capacity gate, and emits a runnable artifact. See [Mode 4](#4--rsi-mode-recursive-self-improvement-over-formal-artifacts).
+A fourth mode — **RSI** — applies recursive self-improvement to formal artifacts (code repositories, math models, physics models, documentation): it induces a scale lattice, mutates it under a measured-capacity gate, and emits a runnable artifact. See [Mode 4](#4--rsi-mode-recursive-self-improvement-over-formal-artifacts).
 
 **Start small.** Auto mode caps at 24 agents. Prefer `2×2×1` or `3×3×2`. Estimate before you spend:
 
@@ -29,7 +29,7 @@ deepthink eval          # mock LLMs, no API key — structural checks only
 **An N×N noun×verb grid: high-temp invent, critic rewrite, then one synthesizer.** Available as:
 
 1. **App Slot Machine Mode** in this app (full LangGraph engine + logs + matrix transparency)
-2. **Portable `/qdad` skill** for Grok Build and other agentic coders — no server required
+2. **Portable `/qdad` skill** for Claude Code, Cursor, Codex, and other agentic coders — no server required
 
 | Classical diffusion | Qualitative Diffusion (QDAD) |
 |---------------------|------------------------------|
@@ -44,7 +44,7 @@ deepthink eval          # mock LLMs, no API key — structural checks only
 2. **Grid** — Build an **N×N** grid of FeatureAgents. Cell *(i, j)* is permanently bound to `nouns[i] × verbs[j]`.
 3. **Forward diffusion** — In parallel, each agent invents one wild, imperfect feature at **noise temperature**.
 4. **Reverse diffusion** — For each denoising step, CriticAgents with the *same* noun+verb signature clean, sharpen, and implementabilize the matrix.
-5. **Decode** — A Synthesizer collapses the clean matrix into a structured **# App Build Prompt** you can hand to Grok-Build, Cursor, Claude Artifacts, etc.
+5. **Decode** — A Synthesizer collapses the clean matrix into a structured **# App Build Prompt** you can hand to Claude Code, Cursor, Codex, or any agentic coder.
 
 **Philosophy (strict)**
 
@@ -59,7 +59,7 @@ deepthink eval          # mock LLMs, no API key — structural checks only
 | Run it… | Location |
 |---------|----------|
 | In-app | **App Slot Machine Mode** · `deepthink/qdad/` |
-| In Grok Build / any agent | [`skills/qdad/SKILL.md`](./skills/qdad/SKILL.md) · `/qdad` · release zip `qdad-skill-*.zip` |
+| In Claude Code / Cursor / Codex / any agent | [`skills/qdad/SKILL.md`](./skills/qdad/SKILL.md) · `/qdad` · release zip `qdad-skill-*.zip` |
 
 ---
 
@@ -170,11 +170,11 @@ Replaces Algorithm Design Mode with **Qualitative Diffusion App Designer (QDAD)*
 - **Phase 3** — Iterative reverse diffusion via CriticAgents (same signature)
 - **Phase 4** — Synthesizer → structured **agentic coding prompt** + transparent matrix
 
-Feed a Midjourney-style app prompt; hand the result to Grok-Build, Cursor, Claude Artifacts, etc.
+Feed a Midjourney-style app prompt; hand the result to Claude Code, Cursor, Codex, or any agentic coder.
 
 ### 4. 🔁 RSI Mode (Recursive Self-Improvement over Formal Artifacts)
 
-**A LangGraph-based recursive self-improvement (RSI) engine that turns any formal system into a self-inspecting, self-mutating, scale-aware scaffold.** This is the fourth section, and it is **API-only** (library + CLI, no web-UI wiring).
+**A LangGraph-based recursive self-improvement (RSI) engine that turns any formal system into a self-inspecting, self-mutating, scale-aware scaffold.** This is the fourth section: library + CLI, plus a live **♾️ RSI Loop** tab in the web UI.
 
 A *law* is any generative formal system that can produce lesser replicas of itself (instantiations): a physics theory, a legal code, a math model, a code repository, a documentation set. A *scale* (or *base*) is a layered rewrite grammar that lets one compact high-level statement expand into many consistent low-level instances — the way binary encodes decimal, or a zodiac encodes individual charts. RSI recovers those scales from raw text, exposes them as mutable state, and evolves them so each generation spawns **more world per symbol** (higher instantiation capacity).
 
@@ -191,6 +191,15 @@ formal text / PDF
 2. Every pattern found in an instantiation becomes eligible for elevation into the higher law.
 3. No descriptive bloat without worldly capacity — rejected mutations leave the lattice untouched.
 4. Everything is a mutation target: graph topology, routing policy, fitness function, artifact generator.
+
+**In the web UI — the Ouroboros Lattice.** The **♾️ RSI Loop** tab draws the run as it happens:
+
+- **The loop** is a ring of the five looping stages (mutate → mesh spawn → fitness → artifact → rectify). `ingest` and `scale induction` spiral into it as a tail, so the graph reads as a serpent eating its tail. A comet marks the active node, and each finished loop leaves a faint echo orbit.
+- **The lattice** is drawn as a mandala inside the ring. The most compact level sits at the centre, and each lower level is a wider ring with rule notches. Mesh instantiations sit on their level's ring, with `expands-to` links running outward. Every node carries orbiting **inhabitant agents**, drawn amber when they were spawned as peers or children.
+- **The mutator swarm** appears as diamonds that are born at *mutate* and judged at *fitness* (green = accepted, red = shed). Accepted ones are absorbed into the core at *rectify*, and a ripple shows whether measured capacity rose.
+- Instrument cards show capacity per lattice version, each level's **base / modulus**, and the scored proposals. Results include the summary, the emitted artifact (downloadable), and the loop log.
+
+**Simulation Mode** (on by default) runs the real engine with its deterministic offline heuristics, so it needs no key. Live events come from `run_rsi_pipeline(..., on_event=fn)`, which is also available to library callers.
 
 **How it works**
 
@@ -339,7 +348,7 @@ async def main():
             break
     print(len(graph.distilled_data), "QA pairs →", graph.dataset_path)
 
-    # 4) RSI → evolved scale lattice + runnable artifact (API-only section)
+    # 4) RSI → evolved scale lattice + runnable artifact
     rsi_text = open("examples/5d_em_fragment.txt", encoding="utf-8").read()
     rsi = await run_rsi(llm, rsi_text, law_title="5d-electromagnetism",
                         params={"iterations": 2, "mutators": 6})
@@ -473,9 +482,9 @@ This is why the distillation dataset + full topology archives are treated as fir
 
 ---
 
-## Portable Skills for Agentic Coders (Grok Build, etc.)
+## Portable Skills for Agentic Coders (Claude Code, Cursor, Codex, etc.)
 
-Drop these into `~/.grok/skills/` (or your host’s skills root). **No open-deepthink server required.**
+Drop these into your agent host’s skills root — e.g. `~/.claude/skills/` for Claude Code, or the equivalent rules/skills folder for Cursor, Codex, and other harnesses. **No open-deepthink server required.**
 
 | Skill | Technique | Use when | Output |
 |-------|-----------|----------|--------|
@@ -528,19 +537,21 @@ Library: `await run_qnn_pipeline(llm, prompt, params={...})` — see [`skills/qn
 | Engine | `deepthink.qnn.run_qnn_pipeline` |
 | Release zip | `qnn-skill-<version>.zip` on [Releases](https://github.com/iblameandrew/open-deepthink/releases) |
 
-### Install both (Grok Build user skills)
+### Install both (user-level skills)
 
 ```bash
 # Linux / macOS — copy full skill folders (SKILL + CODE_REFERENCE + run_template.py)
-mkdir -p ~/.grok/skills/qnn ~/.grok/skills/qdad
-cp skills/qnn/{SKILL.md,CODE_REFERENCE.md,run_template.py,INSTALL.md} ~/.grok/skills/qnn/
-cp skills/qdad/{SKILL.md,CODE_REFERENCE.md,run_template.py,INSTALL.md} ~/.grok/skills/qdad/
+# SKILLS_ROOT is your host's skills folder, e.g. ~/.claude/skills (Claude Code)
+SKILLS_ROOT=~/.claude/skills
+mkdir -p "$SKILLS_ROOT/qnn" "$SKILLS_ROOT/qdad"
+cp skills/qnn/{SKILL.md,CODE_REFERENCE.md,run_template.py,INSTALL.md} "$SKILLS_ROOT/qnn/"
+cp skills/qdad/{SKILL.md,CODE_REFERENCE.md,run_template.py,INSTALL.md} "$SKILLS_ROOT/qdad/"
 export OPEN_DEEPTHINK_ROOT="$(pwd)"   # so runners import deepthink.*
 
 # Or from release assets
 gh release download --repo iblameandrew/open-deepthink --pattern "*-skill-*.zip"
-unzip qnn-skill-*.zip -d ~/.grok/skills
-unzip qdad-skill-*.zip -d ~/.grok/skills
+unzip qnn-skill-*.zip -d "$SKILLS_ROOT"
+unzip qdad-skill-*.zip -d "$SKILLS_ROOT"
 ```
 
 Full skills index: [`skills/README.md`](./skills/README.md).

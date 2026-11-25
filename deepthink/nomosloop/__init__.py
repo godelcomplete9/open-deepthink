@@ -19,7 +19,8 @@ Public library entry::
 
     result = await run_rsi_pipeline(llm, formal_text, iterations=2)
 
-API-only: this section ships library + CLI support, with no web-UI wiring.
+Library + CLI + web UI (the "RSI Loop" tab streams live node events via
+``run_rsi_pipeline(on_event=...)``).
 """
 
 from __future__ import annotations
@@ -53,10 +54,11 @@ from .graph import (  # noqa: E402  (import after load_dotenv by design)
     describe_topology,
     mutate_topology,
     run_pipeline,
+    set_observer,
     set_topology,
 )
 from .mesh import MeshWorld  # noqa: E402
-from .pipeline import default_rsi_params, run_rsi_pipeline  # noqa: E402
+from .pipeline import default_rsi_params, run_rsi_pipeline, snapshot_state  # noqa: E402
 from .state import hash_text  # noqa: E402
 
 __all__ = [
@@ -90,4 +92,6 @@ __all__ = [
     # Pipeline / API
     "run_rsi_pipeline",
     "default_rsi_params",
+    "snapshot_state",
+    "set_observer",
 ]

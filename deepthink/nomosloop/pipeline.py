@@ -20,9 +20,104 @@ import traceback
 from collections.abc import Callable
 from typing import Any
 
-from .graph import describe_topology, run_pipeline
+from .graph import describe_topology, run_pipeline, set_observer
 
 LogFn = Callable[[str], Any] | None
+EventFn = Callable[[dict[str, Any]], Any] | None
+
+# Caps keep live GUI events small even for large lattices / meshes.
+_SNAP_MAX_MESH = 160
+_SNAP_MAX_PROPOSALS = 48
+
+
+def snapshot_state(state: dict[str, Any]) -> dict[str, Any]:
+    """JSON-safe, size-capped view of an RSI state for live visualisation.
+
+    Shape (all keys always present)::
+
+        lattice:   {version, levels:[{id,name,base,modulus,rules:[{id,name}]}]}
+        capacity:  [{version, iteration, capacity, instances, coverage, source}]
+        proposals: [{id, op, level, status, score, author}]
+        mesh:      {nodes:[{id, level, rule}], edges:[[src, dst, rel]]}
+        agents:    [{id, node, level, gen, offspring}]
+        rollbacks, iteration, max_iterations, baseline_capacity
+    """
+    lat = state.get("scale_lattice", {}) or {}
+    levels = []
+    for lv in lat.get("levels", []) or []:
+        levels.append(
+            {
+                "id": str(lv.get("level_id", "?")),
+                "name": str(lv.get("name", "")),
+                "base": str(lv.get("base", "")),
+                "modulus": str(lv.get("modulus", "")),
+                "rules": [
+                    {"id": str(r.get("id", "")), "name": str(r.get("name", ""))}
+                    for r in lv.get("rules", []) or []
+                ],
+            }
+        )
+    nodes = (state.get("mesh_nodes", []) or [])[:_SNAP_MAX_MESH]
+    keep = {n.get("id") for n in nodes}
+    edges = [
+        [e[0], e[1], e[2] if len(e) > 2 else "expands-to"]
+        for e in state.get("mesh_edges", []) or []
+        if e[0] in keep and e[1] in keep
+    ]
+    agents = [
+        {
+            "id": a.get("id"),
+            "node": a.get("node_id"),
+            "level": a.get("level"),
+            "gen": int(a.get("generation", 0) or 0),
+            "offspring": len(a.get("offspring", []) or []),
+        }
+        for a in (state.get("inhabitants", []) or [])
+        if a.get("node_id") in keep
+    ]
+    props = [
+        {
+            "id": p.get("id"),
+            "op": p.get("operation"),
+            "level": p.get("target_level"),
+            "status": p.get("status"),
+            "score": p.get("test_score"),
+            "author": p.get("author_agent"),
+        }
+        for p in (state.get("mutation_proposals", []) or [])[-_SNAP_MAX_PROPOSALS:]
+    ]
+    caps = [
+        {
+            "version": c.get("version"),
+            "iteration": c.get("iteration"),
+            "capacity": float(c.get("capacity", 0.0) or 0.0),
+            "instances": int(c.get("instances", 0) or 0),
+            "coverage": float(c.get("coverage", 0.0) or 0.0),
+            "source": c.get("source"),
+        }
+        for c in state.get("capacity_history", []) or []
+    ]
+    return {
+        "lattice": {"version": lat.get("version"), "levels": levels},
+        "capacity": caps,
+        "baseline_capacity": float(state.get("baseline_capacity", 0.0) or 0.0),
+        "proposals": props,
+        "mesh": {
+            "nodes": [
+                {
+                    "id": n.get("id"),
+                    "level": str(n.get("scale_level", "?")),
+                    "rule": str(n.get("parent_rule", "")),
+                }
+                for n in nodes
+            ],
+            "edges": edges,
+        },
+        "agents": agents,
+        "rollbacks": state.get("rollbacks", []) or [],
+        "iteration": int(state.get("iteration", 0) or 0),
+        "max_iterations": int(state.get("max_iterations", 1) or 1),
+    }
 
 
 def default_rsi_params() -> dict[str, Any]:
@@ -104,6 +199,7 @@ async def run_rsi_pipeline(
     log: LogFn = None,
     session_store: dict | None = None,
     session_id: str = "",
+    on_event: EventFn = None,
 ) -> dict[str, Any]:
     """
     Run the full RSI pipeline over a formal artifact.
@@ -122,6 +218,11 @@ async def run_rsi_pipeline(
         Optional sync/async callable receiving log lines.
     session_store, session_id :
         Optional disk-backed store to persist the final result.
+    on_event :
+        Optional **sync** callable receiving live node events
+        ``{"phase": "enter"|"exit", "node", "iteration", "log", "state"}``
+        (``state`` is :func:`snapshot_state`). It is invoked from the worker
+        thread that runs the graph, so it must be thread-safe.
 
     Returns
     -------
@@ -161,9 +262,25 @@ async def run_rsi_pipeline(
         "every pattern is elevatable; no descriptive bloat without worldly capacity."
     )
 
+    def _observer(phase: str, node: str, state: dict, update: dict | None) -> None:
+        if on_event is None:
+            return
+        merged = {**state, **(update or {})}
+        on_event(
+            {
+                "phase": phase,
+                "node": node,
+                "iteration": int(merged.get("iteration", 0) or 0),
+                "log": list((update or {}).get("topology_log", []) or []),
+                "state": snapshot_state(merged),
+            }
+        )
+
     def _run_sync() -> dict:
         from . import routing
 
+        if on_event is not None:
+            set_observer(_observer)
         bridge = None
         if llm is not None and not offline:
             bridge = _make_bridge(llm)
@@ -180,6 +297,8 @@ async def run_rsi_pipeline(
                 mutators=mutators,
             )
         finally:
+            if on_event is not None:
+                set_observer(None)
             if bridge is not None:
                 routing.clear_llm_bridge()
             if offline:
@@ -227,6 +346,7 @@ async def run_rsi_pipeline(
             "topology_log": state.get("topology_log", []) or [],
             "routing_log": state.get("routing_log", []) or [],
             "proposed_solution": _summarize(state),
+            "snapshot": snapshot_state(state),
         }
 
         if session_store is not None and session_id in session_store:

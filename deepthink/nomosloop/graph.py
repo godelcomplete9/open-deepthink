@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import copy
 import os
+from collections.abc import Callable
 from typing import Any
 
 from langgraph.graph import END, StateGraph
@@ -66,6 +67,41 @@ FITNESS_ACCEPT_THRESHOLD = float(os.environ.get("NOMOSLOOP_ACCEPT", "5.0"))
 SPAWN_BUDGET = int(os.environ.get("NOMOSLOOP_SPAWN_BUDGET", "2"))
 SPAWN_PEERS = int(os.environ.get("NOMOSLOOP_SPAWN_PEERS", "2"))
 SPAWN_CHILDREN_CAP = int(os.environ.get("NOMOSLOOP_SPAWN_CHILDREN_CAP", "8"))
+
+
+# Optional live observer (GUI / telemetry). Called as
+#   observer(phase, node_name, state, update)
+# with phase "enter" (update=None) or "exit" (update = the node's returned dict).
+# Observers must never break the loop: exceptions are swallowed.
+NodeObserver = Callable[[str, str, NomosState, "dict[str, Any] | None"], None]
+_OBSERVER: NodeObserver | None = None
+
+
+def set_observer(fn: NodeObserver | None) -> None:
+    """Install (or clear with ``None``) the live node observer."""
+    global _OBSERVER
+    _OBSERVER = fn
+
+
+def _notify(phase: str, name: str, state: NomosState, update: dict[str, Any] | None) -> None:
+    obs = _OBSERVER
+    if obs is None:
+        return
+    try:
+        obs(phase, name, state, update)
+    except Exception:  # noqa: BLE001 - observers are best-effort
+        pass
+
+
+def _observed(name: str, fn: Callable[[NomosState], dict[str, Any]]):
+    def wrapped(state: NomosState) -> dict[str, Any]:
+        _notify("enter", name, state, None)
+        out = fn(state)
+        _notify("exit", name, state, out)
+        return out
+
+    wrapped.__name__ = getattr(fn, "__name__", name)
+    return wrapped
 
 
 def _log(state: NomosState, tier: str, model: str, agent: str, task: str, offline: bool) -> None:
@@ -477,13 +513,13 @@ def _rectify_route(state: NomosState) -> str:
 def build_graph():
     """Build the compiled LangGraph. Topology mirrors TOPOLOGY (inspectable)."""
     g = StateGraph(NomosState)
-    g.add_node("ingest", ingest_node)
-    g.add_node("scale_induction", scale_induction_node)
-    g.add_node("mutation_proposal", mutation_proposal_node)
-    g.add_node("mesh_spawn", mesh_spawn_node)
-    g.add_node("fitness", fitness_node)
-    g.add_node("artifact_emit", artifact_emit_node)
-    g.add_node("rectify", rectify_node)
+    g.add_node("ingest", _observed("ingest", ingest_node))
+    g.add_node("scale_induction", _observed("scale_induction", scale_induction_node))
+    g.add_node("mutation_proposal", _observed("mutation_proposal", mutation_proposal_node))
+    g.add_node("mesh_spawn", _observed("mesh_spawn", mesh_spawn_node))
+    g.add_node("fitness", _observed("fitness", fitness_node))
+    g.add_node("artifact_emit", _observed("artifact_emit", artifact_emit_node))
+    g.add_node("rectify", _observed("rectify", rectify_node))
     g.set_entry_point(TOPOLOGY["entry"])
     for s, d in TOPOLOGY["edges"]:
         g.add_edge(s, d)

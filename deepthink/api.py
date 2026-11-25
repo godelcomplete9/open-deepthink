@@ -128,6 +128,7 @@ async def run_rsi(
     log: LogFn = None,
     session_id: str = "",
     session_store: dict | None = None,
+    on_event=None,
 ) -> dict[str, Any]:
     """
     Run the RSI (recursive self-improvement) loop over a formal artifact.
@@ -156,6 +157,7 @@ async def run_rsi(
         log=log,
         session_id=session_id,
         session_store=session_store,
+        on_event=on_event,
     )
 
 

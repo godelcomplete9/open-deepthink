@@ -12,7 +12,7 @@ all legitimate RSI mutation targets — hence everything is explicit data.
 
 This is the fourth open-deepthink section: RSI over formal artifacts (code
 repos, math models, physics models, documentation) that follow formal
-structures. It is API-only (no web UI wiring).
+structures. Library, CLI, and the web UI "RSI Loop" tab.
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 """RSI (recursive self-improvement over formal artifacts) unit tests.
 
-API-only section: package structure, LangGraph nodes, offline pipeline, the
-injected-LLM bridge, and the cost estimator. Runs keyless (offline heuristics
+Package structure, LangGraph nodes, offline pipeline, the
+injected-LLM bridge, the cost estimator, and the live GUI event stream. Runs keyless (offline heuristics
 or a tiny fake chat model).
 """
 
@@ -191,6 +191,46 @@ def t5():
 
 
 chk("measured capacity executes the rewrite structure", t5)
+
+
+def t6():
+    import json
+
+    from deepthink.nomosloop import graph, run_rsi_pipeline
+
+    raw = EXAMPLE.read_text(encoding="utf-8")
+    events = []
+
+    async def run():
+        with tempfile.TemporaryDirectory() as workdir:
+            return await run_rsi_pipeline(
+                None,
+                raw,
+                params={"iterations": 2, "mutators": 3, "offline": True},
+                artifact_path=str(Path(workdir) / "artifact.py"),
+                on_event=events.append,
+            )
+
+    res = asyncio.run(run())
+    # every node is bracketed by enter/exit, and the loop re-enters mutation_proposal
+    assert events[0]["phase"] == "enter" and events[0]["node"] == "ingest", events[0]
+    assert events[-1]["phase"] == "exit" and events[-1]["node"] == "rectify", events[-1]
+    assert sum(1 for e in events if e["phase"] == "enter") == sum(
+        1 for e in events if e["phase"] == "exit"
+    )
+    entered = [e["node"] for e in events if e["phase"] == "enter"]
+    assert entered.count("mutation_proposal") == 2, entered
+    # snapshots are JSON-safe and carry the lattice, mesh, agents, and swarm
+    last = events[-1]["state"]
+    json.dumps(events)
+    assert last["lattice"]["levels"] and last["mesh"]["nodes"] and last["agents"]
+    assert last["proposals"] and last["capacity"]
+    assert res["snapshot"]["lattice"]["version"] == res["lattice_version"]
+    # the observer is cleared once the run ends
+    assert graph._OBSERVER is None
+
+
+chk("live on_event stream brackets every node with snapshots", t6)
 
 
 ok = sum(1 for _, s, _ in results if s == "OK")
