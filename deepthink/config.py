@@ -193,6 +193,18 @@ class Settings(BaseSettings):
     distillation_token_budget: int = Field(default=500_000, ge=1)
     distillation_output_dir: str = Field(default="distillation_output")
 
+    # --- RSI (recursive self-improvement over formal artifacts) defaults ---
+    rsi_iterations: int = Field(default=1, ge=1)
+    rsi_mutators: int = Field(default=6, ge=0)
+    rsi_offline: bool = Field(default=False)
+    rsi_artifact_dir: str = Field(default="artifacts")
+    rsi_cheap_model: str = Field(default="google/gemini-2.0-flash-001")
+    rsi_frontier_model: str = Field(default="anthropic/claude-opus-4.5")
+    rsi_accept_threshold: float = Field(default=5.0, ge=0.0, le=10.0)
+    rsi_spawn_budget: int = Field(default=2, ge=0)
+    rsi_spawn_peers: int = Field(default=2, ge=0)
+    rsi_spawn_children_cap: int = Field(default=8, ge=0)
+
     # --- Paths / state ---
     open_deepthink_root: str | None = Field(
         default=None,
@@ -256,6 +268,15 @@ class Settings(BaseSettings):
             "temperature_scale": self.qdad_temperature_scale,
             "denoising_steps": self.qdad_denoising_steps,
             "noun_verb_temperature": self.qdad_noun_verb_temperature,
+        }
+
+    def rsi_defaults(self) -> dict[str, Any]:
+        """Params dict compatible with the RSI pipeline (``run_rsi``)."""
+        return {
+            "iterations": self.rsi_iterations,
+            "mutators": self.rsi_mutators,
+            "offline": self.rsi_offline,
+            "artifact_dir": self.rsi_artifact_dir,
         }
 
     def provider_defaults(self) -> dict[str, Any]:

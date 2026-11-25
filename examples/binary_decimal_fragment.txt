@@ -1,0 +1,27 @@
+FORMAL FRAGMENT: POSITIONAL NUMERAL SYSTEMS
+
+Definition (positional value). A numeral system with radix b expresses a
+natural number v as the finite sum
+
+    v = Σ_k d_k · b^k,        d_k ∈ {0, 1, ..., b − 1}
+
+The coefficient d_k is the k-th digit; the digit constraint d_k < b closes
+the expansion and the carry rule wraps digits at b^k.
+
+Binary radix. For b = 2 the alphabet is {0, 1} and the digit string of v is
+its bit expansion. One byte is an 8-bit window: values are taken modulo
+2^8 = 256, so the byte ground space has exactly 256 equivalence classes.
+
+Decimal radix. For b = 10 the alphabet is {0, ..., 9} and the digit string
+is the familiar decimal expansion of v.
+
+Equivalence statement (radix homomorphism). Positional encoding is a ring
+homomorphism from (v, +, ×) to digit vectors with carry: addition of values
+corresponds to digit-wise addition followed by carry normalization. The
+radix parameter b is the only datum needed to regenerate every digit
+instance from the single value statement.
+
+Modulus. The byte modulus 256 acts as the closing constraint of the ground
+scale: instances 0..255 are distinct classes, and any value wraps via mod
+256. Hexadecimal radix 16 is the same construction on the alphabet
+{0,...,9,a,...,f}.

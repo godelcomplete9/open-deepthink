@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "open-deepthink"
 dynamic = ["version"]
-description = "Qualitative Neural Networks, Qualitative Diffusion (QDAD), and evolutionary knowledge distillation — Python library + optional web UI"
+description = "Qualitative Neural Networks, Qualitative Diffusion (QDAD), RSI over formal artifacts, and evolutionary knowledge distillation — Python library + optional web UI"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
@@ -13,9 +13,10 @@ authors = [
     { name = "iblameandrew" }
 ]
 keywords = [
-    "ai", "multi-agent", "qnn", "qdad", "langgraph", "llm",
+    "ai", "multi-agent", "qnn", "qdad", "rsi", "langgraph", "llm",
     "openrouter", "llamacpp", "knowledge-distillation",
     "qualitative-diffusion", "mirror-descent",
+    "recursive-self-improvement", "formal-methods",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",

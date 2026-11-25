@@ -23,6 +23,10 @@ test_results/
 # Distillation run outputs
 distillation_output/
 
+# RSI run outputs (generated artifacts + optional state dumps)
+artifacts/
+rsi_result.json
+
 # Local data and secrets
 .env
 *.env

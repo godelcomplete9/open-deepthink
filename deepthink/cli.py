@@ -7,6 +7,7 @@ Usage::
     deepthink serve           # same
     deepthink qnn  --prompt "…" [--debug]
     deepthink qdad --prompt "…" [--debug]
+    deepthink rsi  --input artifact.txt [--iterations N] [--offline]
     deepthink version
 """
 
@@ -15,6 +16,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 
 
@@ -201,6 +203,73 @@ def cmd_qdad(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_rsi(args: argparse.Namespace) -> int:
+    from deepthink import run_rsi
+
+    # Only explicit overrides — defaults are applied inside the pipeline so
+    # they never clobber the CLI's law_title / artifact_path.
+    params: dict = {"offline": bool(args.offline)}
+    if args.iterations:
+        params["iterations"] = args.iterations
+    if args.mutators is not None:
+        params["mutators"] = args.mutators
+
+    try:
+        with open(args.input, encoding="utf-8", errors="replace") as f:
+            raw_text = f.read()
+    except OSError as e:
+        print(f"Failed to read --input {args.input!r}: {e}", file=sys.stderr)
+        return 2
+    if not raw_text.strip():
+        print(f"--input {args.input!r} is empty; nothing to induce.", file=sys.stderr)
+        return 2
+
+    from deepthink.cost import estimate_rsi_cost
+
+    est = estimate_rsi_cost(
+        iterations=int(params.get("iterations") or 1),
+        mutators=int(params.get("mutators") or 0),
+    )
+    print(est.summary_line(), file=sys.stderr)
+    if (
+        not args.offline
+        and not args.debug
+        and not getattr(args, "yes", False)
+        and est.llm_calls > 80
+    ):
+        print(
+            "Refusing large run without --yes "
+            f"({est.llm_calls} estimated calls). Shrink iterations/mutators or pass --yes.",
+            file=sys.stderr,
+        )
+        return 2
+
+    llm = None if args.offline else _build_llm(args)
+
+    artifact = args.artifact or ""
+    if not artifact:
+        artifact = os.path.join("artifacts", f"artifact_rsi_{args.title}.py")
+
+    async def _run():
+        return await run_rsi(
+            llm,
+            raw_text,
+            params=params,
+            law_title=args.title,
+            artifact_path=artifact,
+            log=_print_log if args.verbose else None,
+        )
+
+    result = asyncio.run(_run())
+    text = result.get("proposed_solution") or result
+    print(text if isinstance(text, str) else json.dumps(text, indent=2))
+    if args.json_out:
+        with open(args.json_out, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2, ensure_ascii=False)
+        print(f"Wrote {args.json_out}", file=sys.stderr)
+    return 0
+
+
 def _add_provider_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--provider",
@@ -243,7 +312,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="deepthink",
         description=(
-            "open-deepthink — QNN, QDAD, and Knowledge Distillation as a library + optional web UI"
+            "open-deepthink — QNN, QDAD, RSI, and Knowledge Distillation as a library + optional web UI"
         ),
     )
     sub = parser.add_subparsers(dest="command")
@@ -275,13 +344,46 @@ def build_parser() -> argparse.ArgumentParser:
     _add_provider_args(p_qdad)
     p_qdad.set_defaults(func=cmd_qdad)
 
+    p_rsi = sub.add_parser(
+        "rsi",
+        help="Run RSI (recursive self-improvement) over a formal artifact",
+    )
+    p_rsi.add_argument(
+        "--input",
+        "-i",
+        required=True,
+        help="Path to a formal artifact (.txt/.md/.tex/.pdf)",
+    )
+    p_rsi.add_argument("--title", default="rsi-artifact", help="Law / artifact title")
+    p_rsi.add_argument("--iterations", type=int, default=None, help="RSI cycles")
+    p_rsi.add_argument(
+        "--mutators",
+        type=int,
+        default=None,
+        help="Gen-0 swarm size (0 = no-mutation baseline)",
+    )
+    p_rsi.add_argument(
+        "--artifact",
+        default="",
+        help="Output artifact path (default artifacts/artifact_rsi_<title>.py)",
+    )
+    p_rsi.add_argument(
+        "--offline",
+        action="store_true",
+        help="Force deterministic offline heuristics (no API calls)",
+    )
+    _add_provider_args(p_rsi)
+    p_rsi.set_defaults(func=cmd_rsi)
+
     p_est = sub.add_parser("estimate", help="Print LLM-call estimate (no network)")
-    p_est.add_argument("kind", choices=("qnn", "qdad", "distill"))
+    p_est.add_argument("kind", choices=("qnn", "qdad", "distill", "rsi"))
     p_est.add_argument("--layers", type=int, default=3)
     p_est.add_argument("--width", type=int, default=3)
     p_est.add_argument("--epochs", type=int, default=2)
     p_est.add_argument("--n", type=int, default=3)
     p_est.add_argument("--steps", type=int, default=2)
+    p_est.add_argument("--iterations", type=int, default=1)
+    p_est.add_argument("--mutators", type=int, default=6)
     p_est.set_defaults(func=cmd_estimate)
 
     p_eval = sub.add_parser("eval", help="Free structural eval (mock LLMs, no API key)")
@@ -295,12 +397,15 @@ def cmd_estimate(args: argparse.Namespace) -> int:
         estimate_distillation_cost,
         estimate_qdad_cost,
         estimate_qnn_cost,
+        estimate_rsi_cost,
     )
 
     if args.kind == "qnn":
         est = estimate_qnn_cost(args.layers, args.width, args.epochs)
     elif args.kind == "qdad":
         est = estimate_qdad_cost(args.n, args.steps)
+    elif args.kind == "rsi":
+        est = estimate_rsi_cost(args.iterations, args.mutators)
     else:
         est = estimate_distillation_cost(args.epochs)
     print(est.summary_line())
@@ -319,6 +424,16 @@ def cmd_eval(_args: argparse.Namespace) -> int:
 
 def main(argv: list[str] | None = None) -> None:
     """``open-deepthink`` / ``deepthink`` console scripts."""
+    # Windows consoles default to cp1252; force UTF-8 so unicode output
+    # (arrows, lattice glyphs) never crashes a run.
+    for _stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(_stream, "reconfigure", None)
+        if reconfigure is None:
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
     argv = list(sys.argv[1:] if argv is None else argv)
     # Bare invocation → serve web UI (backward compatible with python -m deepthink)
     if not argv:
