@@ -5,6 +5,7 @@ Usage::
 
     deepthink                 # start web UI (default)
     deepthink serve           # same
+    deepthink theory --prompt "…" [--swarm 5] [--domain olympiad] [--debug]
     deepthink qnn  --prompt "…" [--debug]
     deepthink qdad --prompt "…" [--debug]
     deepthink rsi  --input policy.txt [--drive leak|stock|bal] [--offline]
@@ -90,6 +91,134 @@ def cmd_version(_args: argparse.Namespace) -> int:
     from deepthink import __release_name__, __version__
 
     print(f"open-deepthink {__version__} ({__release_name__})")
+    return 0
+
+
+def _theory_log(verbose: bool):
+    """Progress lines to stderr; structured SWARM_EVENT and FINAL_ANSWER lines are skipped."""
+    if not verbose:
+        return None
+
+    def _log(msg: str) -> None:
+        if msg.startswith("SWARM_EVENT:") or msg.startswith("FINAL_ANSWER:"):
+            return
+        _print_log(msg)
+
+    return _log
+
+
+def cmd_theory(args: argparse.Namespace) -> int:
+    from deepthink import default_theory_params, run_theory
+    from deepthink.cost import estimate_theory_cost
+
+    params = default_theory_params()
+    if args.input:
+        try:
+            with open(args.input, encoding="utf-8", errors="replace") as f:
+                problem = f.read().strip()
+        except OSError as e:
+            print(f"Failed to read --input {args.input!r}: {e}", file=sys.stderr)
+            return 2
+    else:
+        problem = (args.prompt or "").strip()
+    if not problem:
+        print("Give a problem with --prompt or --input.", file=sys.stderr)
+        return 2
+    overrides = {
+        "domain": args.domain,
+        "answer_type": args.answer_type,
+        "swarm_size": args.swarm,
+        "rounds": args.rounds,
+        "quorum": args.quorum,
+        "vote": args.vote,
+        "learning_rate": args.lr,
+        "max_depth": args.depth,
+        "branching": args.branching,
+        "easiness": args.easiness,
+        "max_cells": args.max_cells,
+        "concurrency": args.concurrency,
+        "max_calls": args.max_calls,
+        "temperature_min": args.temperature_min,
+        "temperature_max": args.temperature_max,
+        "seed": args.seed,
+        "ledger": "private" if args.private_ledger else None,
+        "max_arbitrations": args.arbitrations,
+    }
+    for key, value in overrides.items():
+        if value is not None:
+            params[key] = value
+    if args.layers or args.width:
+        params["qnn_mode"] = "manual"
+        params["manual_layers"] = args.layers or params["manual_layers"]
+        params["manual_width"] = args.width or params["manual_width"]
+    if args.no_verify:
+        params["verify"] = False
+    if args.polish:
+        params["polish"] = True
+
+    est = estimate_theory_cost(
+        swarm_size=int(params["swarm_size"]),
+        rounds=int(params["rounds"]),
+        layers=int(params["manual_layers"]),
+        width=int(params["manual_width"]),
+        max_depth=int(params["max_depth"]),
+        branching=int(params["branching"]),
+        max_cells=int(params["max_cells"]),
+        verify=bool(params["verify"]),
+        max_arbitrations=int(params["max_arbitrations"]),
+        polish=bool(params["polish"]),
+    )
+    print(est.summary_line() + " (upper bound)", file=sys.stderr)
+    capped = bool(params.get("max_calls")) and int(params["max_calls"]) <= 80
+    if not args.debug and not args.yes and not capped and est.llm_calls > 80:
+        print(
+            "Refusing large run without --yes "
+            f"({est.llm_calls} estimated calls at most). Shrink the swarm, the depth or "
+            "the rounds, cap it with --max-calls 80, or pass --yes.",
+            file=sys.stderr,
+        )
+        return 2
+
+    llm = _build_llm(args)
+    member_llms = None
+    member_models = None
+    if args.member_models and not args.debug:
+        from deepthink.providers import create_llm
+
+        member_models = [m.strip() for m in args.member_models.split(",") if m.strip()]
+        member_llms = [
+            create_llm(
+                provider=args.provider,
+                model=m,
+                api_key=args.api_key,
+                base_url=getattr(args, "base_url", None),
+            )
+            for m in member_models
+        ]
+
+    async def _run():
+        return await run_theory(
+            llm,
+            problem,
+            params=params,
+            member_llms=member_llms,
+            member_models=member_models,
+            log=_theory_log(args.verbose),
+        )
+
+    result = asyncio.run(_run())
+    print(result.get("proposed_solution") or json.dumps(result.get("final_solution"), indent=2))
+    calls = (result.get("calls") or {}).get("total", "?")
+    print(
+        f"\nAnswer: {result.get('final_answer') or '(none)'} · "
+        f"{'converged' if result.get('converged') else 'not converged'} · "
+        f"support {float(result.get('support') or 0):.0%} · {calls} LLM calls",
+        file=sys.stderr,
+    )
+    if args.json_out:
+        with open(args.json_out, "w", encoding="utf-8") as f:
+            json.dump(result, f, indent=2, ensure_ascii=False, default=str)
+        print(f"Wrote {args.json_out}", file=sys.stderr)
     return 0
 
 
@@ -362,7 +491,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="deepthink",
         description=(
-            "open-deepthink — QNN, QDAD, RSI, and Knowledge Distillation as a library + optional web UI"
+            "open-deepthink — Theory Synthesis, QNN, QDAD, RSI, and Knowledge Distillation "
+            "as a library + optional web UI"
         ),
     )
     sub = parser.add_subparsers(dest="command")
@@ -372,6 +502,53 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_ver = sub.add_parser("version", help="Print package version")
     p_ver.set_defaults(func=cmd_version)
+
+    p_th = sub.add_parser(
+        "theory",
+        help="Theory Synthesis: a swarm of QNNs solves one problem and builds a body of work",
+    )
+    p_th.add_argument("--prompt", "-p", default=None, help="The problem statement")
+    p_th.add_argument("--input", "-i", default=None, help="Read the problem from a file")
+    p_th.add_argument(
+        "--domain",
+        choices=("auto", "math", "olympiad", "algorithms", "physics"),
+        default=None,
+        help="Prompt profile (default: auto)",
+    )
+    p_th.add_argument("--answer-type", default=None, help="auto | proof | number | set | ...")
+    p_th.add_argument("--swarm", type=int, default=None, help="Number of QNNs (default 5)")
+    p_th.add_argument("--rounds", type=int, default=None, help="Swarm rounds (default 2)")
+    p_th.add_argument("--quorum", type=float, default=None, help="Leader support to stop (0.5)")
+    p_th.add_argument("--vote", choices=("weighted", "plurality"), default=None)
+    p_th.add_argument("--lr", type=float, default=None, help="Mirror-descent step eta (1.0)")
+    p_th.add_argument("--layers", type=int, default=None, help="Layers per QNN (manual)")
+    p_th.add_argument("--width", type=int, default=None, help="Agents per layer (manual)")
+    p_th.add_argument("--depth", type=int, default=None, help="Max decomposition depth (2)")
+    p_th.add_argument("--branching", type=int, default=None, help="Max subcells per split (3)")
+    p_th.add_argument("--easiness", type=float, default=None, help="Leaf threshold tau (0.75)")
+    p_th.add_argument("--max-cells", type=int, default=None, help="Cells per QNN tree (10)")
+    p_th.add_argument("--concurrency", type=int, default=None, help="Parallel LLM calls (8)")
+    p_th.add_argument("--max-calls", type=int, default=None, help="Hard call budget (0 = none)")
+    p_th.add_argument(
+        "--arbitrations", type=int, default=None, help="Conflicts settled per round (4)"
+    )
+    p_th.add_argument("--temperature-min", type=float, default=None)
+    p_th.add_argument("--temperature-max", type=float, default=None)
+    p_th.add_argument("--seed", type=int, default=None, help="Seed for reproducible sampling")
+    p_th.add_argument(
+        "--member-models",
+        default=None,
+        help="Comma-separated models assigned to QNNs round-robin (a mixed-model swarm)",
+    )
+    p_th.add_argument(
+        "--private-ledger",
+        action="store_true",
+        help="Each QNN reads only its own results (independent votes)",
+    )
+    p_th.add_argument("--no-verify", action="store_true", help="Skip proposal verification")
+    p_th.add_argument("--polish", action="store_true", help="One extra call to write the report")
+    _add_provider_args(p_th)
+    p_th.set_defaults(func=cmd_theory)
 
     p_qnn = sub.add_parser("qnn", help="Run Qualitative Neural Network (library)")
     p_qnn.add_argument("--prompt", "-p", required=True, help="Problem / impasse brief")
@@ -471,7 +648,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_rsi.set_defaults(func=cmd_rsi)
 
     p_est = sub.add_parser("estimate", help="Print LLM-call estimate (no network)")
-    p_est.add_argument("kind", choices=("qnn", "qdad", "distill", "rsi"))
+    p_est.add_argument("kind", choices=("theory", "qnn", "qdad", "distill", "rsi"))
     p_est.add_argument("--layers", type=int, default=3)
     p_est.add_argument("--width", type=int, default=3)
     p_est.add_argument("--epochs", type=int, default=2)
@@ -479,6 +656,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_est.add_argument("--steps", type=int, default=2)
     p_est.add_argument("--iterations", type=int, default=1)
     p_est.add_argument("--mutators", type=int, default=6)
+    p_est.add_argument("--swarm", type=int, default=5, help="theory: QNNs in the swarm")
+    p_est.add_argument("--rounds", type=int, default=2, help="theory: swarm rounds")
+    p_est.add_argument("--depth", type=int, default=2, help="theory: decomposition depth")
+    p_est.add_argument("--branching", type=int, default=3, help="theory: subcells per split")
+    p_est.add_argument("--max-cells", type=int, default=10, help="theory: cells per QNN")
     p_est.set_defaults(func=cmd_estimate)
 
     p_eval = sub.add_parser("eval", help="Free structural eval (mock LLMs, no API key)")
@@ -493,9 +675,20 @@ def cmd_estimate(args: argparse.Namespace) -> int:
         estimate_qdad_cost,
         estimate_qnn_cost,
         estimate_rsi_cost,
+        estimate_theory_cost,
     )
 
-    if args.kind == "qnn":
+    if args.kind == "theory":
+        est = estimate_theory_cost(
+            args.swarm,
+            args.rounds,
+            layers=args.layers,
+            width=args.width,
+            max_depth=args.depth,
+            branching=args.branching,
+            max_cells=args.max_cells,
+        )
+    elif args.kind == "qnn":
         est = estimate_qnn_cost(args.layers, args.width, args.epochs)
     elif args.kind == "qdad":
         est = estimate_qdad_cost(args.n, args.steps)

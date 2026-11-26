@@ -188,6 +188,215 @@ class DistillationMockLLM(Runnable):
         )
 
 
+_THEORY_SUBCELLS = [
+    ("Compute the first few values of the sequence and find the pattern.", "computation", []),
+    ("Prove the pattern by induction on n.", "lemma", [0]),
+    ("Evaluate the closed form at n = 2025 and simplify.", "computation", [1]),
+]
+
+
+_THEORY_MARKERS = (
+    "you size a theory synthesis swarm member",
+    "you are the theory seed generator",
+    "you are the theory brief writer",
+    "you are the qnn node generator for a theory synthesis member",
+    "you are the cell decomposer of a theory synthesis qnn",
+    "you are a theory synthesis solver",
+    "you are a theory synthesis synthesizer",
+    "you are an independent verifier for theory synthesis",
+    "you are the theory arbiter",
+    "you are the persona evolver for a theory synthesis member",
+    "you are the theory reframer",
+    "you write the final theory synthesis report",
+)
+
+
+def _crc(text: str) -> int:
+    import zlib
+
+    return zlib.crc32(text.encode("utf-8", "ignore"))
+
+
+def _mock_theory(raw_prompt: str) -> str:
+    """Deterministic Theory Synthesis responses for Simulation Mode and tests.
+
+    The swarm splits about 70/30 between two answers on the first round; a
+    reframed retry lands on the majority, so a simulated run shows dissent,
+    the body of work filling up, and convergence.
+    """
+    prompt = raw_prompt.lower()
+    if "you size a theory synthesis swarm member" in prompt:
+        return json.dumps(
+            {
+                "domain": "olympiad",
+                "answer_type": "number",
+                "difficulty": 6,
+                "recommended_depth": 2,
+                "recommended_branching": 3,
+                "recommended_layers": 2,
+                "recommended_width": 2,
+                "reasoning": "Mock sizing for Simulation Mode.",
+            }
+        )
+    if "you are the theory seed generator" in prompt:
+        return (
+            "induct telescope bound invariant residue parity lattice symmetry extremum "
+            "pigeonhole recurrence bijection smooth iterate potential monovariant"
+        )
+    if "you are the theory brief writer" in prompt:
+        return "Mock brief: the exact problem statement extracted from the attachments."
+    if "you are the qnn node generator for a theory synthesis member" in prompt:
+        tail = raw_prompt.split("Agent ids to fill", 1)[-1]
+        ids = list(dict.fromkeys(re.findall(r"agent_\d+_\d+", tail)))
+        columns = raw_prompt.split("Columns:", 1)[-1].split("Agent ids", 1)[0]
+        tag = _crc(columns) % 997
+        agents = []
+        for aid in ids:
+            layer = int(aid.split("_")[1])
+            role = "solver" if layer == 0 else "synthesizer"
+            agents.append(
+                {
+                    "id": aid,
+                    "name": f"Mock {role} {tag}-{aid[6:]}",
+                    "specialty": f"mock {role} for induction and invariants",
+                    "skills": ["induction", "invariants", "telescoping sums", "small cases"],
+                    "system_prompt": (
+                        f"You are a mock {role} spanned from seed words. "
+                        "Justify every step and check small cases."
+                    ),
+                }
+            )
+        return json.dumps({"agents": agents})
+    if "you are the cell decomposer of a theory synthesis qnn" in prompt:
+        if "depth 0 of" in prompt:
+            subcells = []
+            for k, (statement, kind, deps) in enumerate(_THEORY_SUBCELLS):
+                found = re.search(
+                    r"- (T\d+) \[[^\]]*(?:verified|corroborated)[^\]]*\] " + re.escape(statement),
+                    raw_prompt,
+                )
+                subcells.append(
+                    {
+                        "statement": statement,
+                        "kind": kind,
+                        "depends_on": deps,
+                        "best_solver": "agent_0_0",
+                        "easiness": 0.9,
+                        "reuse": found.group(1) if (k == 0 and found) else "",
+                    }
+                )
+            return json.dumps(
+                {
+                    "best_solver": "agent_0_0",
+                    "easiness": 0.3,
+                    "atomic": False,
+                    "plan": "Find the pattern, prove it, then evaluate.",
+                    "subcells": subcells,
+                }
+            )
+        return json.dumps(
+            {"best_solver": "agent_0_0", "easiness": 0.9, "atomic": True, "subcells": []}
+        )
+    if "you are a theory synthesis solver" in prompt:
+        cell = re.search(r"your cell \(id ([\w.]+)", prompt)
+        cid = cell.group(1) if cell else "r"
+        own = prompt.split("your cell (id", 1)[-1][:400]
+        if "induction" in own:
+            answer = "proof"
+        elif "first few values" in own:
+            answer = "a_n = n + 1"
+        else:
+            answer = "2026"
+        return json.dumps(
+            {
+                "result": f"Mock derivation for cell {cid}: checked n = 1, 2, 3 and argued in general.",
+                "claim": f"Cell {cid} holds with answer {answer}.",
+                "final_answer": answer,
+                "confidence": 0.8,
+                "checks": "small cases n = 1, 2, 3",
+                "uses": [],
+                "same_as": "",
+                "contradicts": [],
+            }
+        )
+    if "you are a theory synthesis synthesizer" in prompt:
+        if "this is the root cell" in prompt:
+            who = re.search(r"YOU ARE ([^,]+),", raw_prompt)
+            persona = who.group(1) if who else raw_prompt[:200]
+            if "suggested framing" in prompt:
+                answer = "2026"
+            else:
+                answer = "2026" if _crc(persona) % 10 < 7 else "2025"
+            return json.dumps(
+                {
+                    "result": (
+                        "By the pattern a_n = n + 1, proved by induction, a_2025 = 2026. "
+                        f"\\boxed{{{answer}}}"
+                    ),
+                    "claim": f"The answer is {answer}.",
+                    "final_answer": answer,
+                    "confidence": 0.75,
+                    "gaps": [],
+                    "uses": [],
+                    "contradicts": [],
+                }
+            )
+        return json.dumps(
+            {
+                "result": "Mock synthesis of the subcells.",
+                "claim": "The subcells combine.",
+                "final_answer": "proof",
+                "confidence": 0.7,
+                "gaps": [],
+            }
+        )
+    if "you are an independent verifier for theory synthesis" in prompt:
+        stated = prompt.split("stated final answer:", 1)[-1][:80]
+        score = 0.85 if "2026" in stated else 0.55
+        entries = re.findall(r"- (T\d+) \(", raw_prompt)
+        return json.dumps(
+            {
+                "score": score,
+                "verdict": "valid" if score > 0.8 else "minor_gaps",
+                "issues": [] if score > 0.8 else ["The evaluation step is off by one."],
+                "answer_check": "Mock check: n = 1 gives 2.",
+                "confirmed": entries[:2] if score > 0.8 else [],
+                "refuted": [],
+            }
+        )
+    if "you are the theory arbiter" in prompt:
+        return json.dumps({"verdict": "A", "reason": "Mock arbitration: entry A checks on n = 1."})
+    if "you are the persona evolver for a theory synthesis member" in prompt:
+        ids = list(dict.fromkeys(re.findall(r"agent_\d+_\d+", raw_prompt)))
+        return json.dumps(
+            {
+                "agents": [
+                    {
+                        "id": aid,
+                        "system_prompt": (
+                            "You are an evolved mock agent. Recheck every evaluation step and "
+                            "test the boundary case before you conclude."
+                        ),
+                        "skills": ["induction", "boundary checks", "small cases", "invariants"],
+                    }
+                    for aid in ids
+                ]
+            }
+        )
+    if "you are the theory reframer" in prompt:
+        return json.dumps(
+            {
+                "framings": [
+                    "Treat the sequence as a recurrence and solve it in closed form first.",
+                    "Find an invariant of the process, then evaluate it at the end state.",
+                ]
+            }
+        )
+    if "you write the final theory synthesis report" in prompt:
+        return "## Answer\n2026\n\n## Solution\nMock write-up.\n\n## Checks and caveats\nMock."
+    return json.dumps({"result": "Mock theory output.", "final_answer": "", "confidence": 0.5})
+
+
 class CoderMockLLM(Runnable):
     """A mock LLM for debugging that returns instant, pre-canned CODE / QDAD responses."""
 
@@ -205,6 +414,9 @@ class CoderMockLLM(Runnable):
     async def ainvoke(self, input_data, config: RunnableConfig | None = None, **kwargs):
         prompt = str(input_data).lower()
         # Debug mocks are instant — no simulated latency.
+
+        if any(marker in prompt for marker in _THEORY_MARKERS):
+            return _mock_theory(str(input_data))
 
         if "you are a helpful ai assistant" in prompt:
             return "This is a mock streaming response for the RAG chat in Coder debug mode."

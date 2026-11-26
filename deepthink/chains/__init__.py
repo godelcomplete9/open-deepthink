@@ -44,6 +44,19 @@ from .synthesis_chains import (
     get_problem_reframer_chain,
     get_synthesis_chain,
 )
+from .theory_chains import (
+    get_theory_arbiter_chain,
+    get_theory_brief_chain,
+    get_theory_cell_chain,
+    get_theory_decomposer_chain,
+    get_theory_member_spanner_chain,
+    get_theory_persona_evolver_chain,
+    get_theory_reframer_chain,
+    get_theory_report_chain,
+    get_theory_seed_chain,
+    get_theory_sizer_chain,
+    get_theory_verifier_chain,
+)
 from .utility_chains import (
     get_code_detector_chain,
     get_interrogator_chain,
@@ -101,4 +114,16 @@ __all__ = [
     "get_qdad_noise_chain",
     "get_qdad_critic_chain",
     "get_qdad_synthesis_chain",
+    # Theory Synthesis (swarm of QNNs)
+    "get_theory_brief_chain",
+    "get_theory_sizer_chain",
+    "get_theory_seed_chain",
+    "get_theory_member_spanner_chain",
+    "get_theory_decomposer_chain",
+    "get_theory_cell_chain",
+    "get_theory_verifier_chain",
+    "get_theory_arbiter_chain",
+    "get_theory_persona_evolver_chain",
+    "get_theory_reframer_chain",
+    "get_theory_report_chain",
 ]

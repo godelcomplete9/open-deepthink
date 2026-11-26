@@ -1,6 +1,18 @@
 # Release Notes — Unreleased
 
-**Tagline:** "RSI for cybersecurity on Agent Mechanics"
+**Tagline:** "Theory Synthesis: a swarm of QNNs, one body of work" · "RSI for cybersecurity on Agent Mechanics"
+
+### Theory Synthesis (replaces Brainstorming mode in the web UI)
+* New engine `deepthink/theory/` for math problems, algorithm design, physics and single IMO-style instances: a swarm of QNNs solves one problem in parallel (`run_theory`, `deepthink theory`, web mode `theory`)
+* Each QNN keeps the QNN heuristic (seed word-vectors → personas; layer 0 solvers, layers 1+ synthesizers) and is modified for problem solving: a **descent** splits the problem into cells until each is easy for one of its solvers (`easiness ≥ τ`, depth ≤ D, branching ≤ b, ≤ C cells); an **ascent** solves the leaves in parallel and collapses each tree height with the matching synthesizer layer, respecting declared dependencies
+* **Body of work** (`ledger.py`): every cell writes its result to one shared ledger with authorship and dependencies; repeated results merge and become corroborated; contradicting answers, declared `same_as` mismatches and declared `contradicts` open conflicts; an arbiter settles them after each round; refuted results taint everything built only on them, including proposals; verifiers confirm or refute the entries a proposal rests on; decomposers reuse established entries (with a same-subject guard); agents read the most relevant entries and cite them by id; proposals are never shown to other agents; `private` mode keeps each QNN's reading to its own entries
+* **Convergence** (`consensus.py`): answers are canonicalized (`answers.py`: boxed LaTeX, fractions, sets, yes/no, big-O, units with tolerance) and voted on with mass Σ wᵢqᵢ and support Σ wᵢ; weights take an entropic mirror-descent step (exponentiated gradient) each round; the run stops when the leader's support reaches the quorum; `plurality` mode is the plain most-common-answer rule
+* Dissenting QNNs rewrite their personas (rate η·ℓᵢ), respawn from fresh seeds when their weight collapses, and get a new framing of the same problem from a reframer that sees no answers
+* Harness controls: swarm size, rounds, quorum, vote mode, η, topology, depth, branching, τ, cells per QNN, shared/private body of work, verification, arbitrations, global concurrency cap, hard call budget, temperature spread, mixed-model swarm (Per-Agent Models / `--member-models`), optional report polish, seed
+* Domain profiles (`domains.py`): math, olympiad, algorithms, physics, with an `auto` sizer
+* `estimate_theory_cost` / `deepthink estimate theory`: a provable upper bound on LLM calls
+* Web UI: the second tab is now **∑ Theory Synthesis**, with the swarm controls, a cost line, and a live swarm panel (QNNs coloured by the answer they back, vote bars against the quorum, body-of-work counts). Simulation Mode runs without an API key
+* The classic QNN (Solution-Space Report) is unchanged: `run_qnn`, `deepthink qnn`, the `/qnn` skill and API mode `brainstorm`
 
 ### RSI: recursive self-improvement for cybersecurity
 * The RSI section now targets an institution's **security policies** (policies, runbooks, standards); agentic coding is out of scope
@@ -23,6 +35,7 @@
 * README: RSI is the headline section, with the mechanism, drives, models, benchmark and limits
 
 ### Tests
+* `tests/phase_theory.py` (15 checks): canonical answers, the 100-proposal plurality, the mirror-descent closed form and rising support, the body-of-work rules (merge, conflict, arbitration, taint, reuse guard, private mode), descent limits and dependency order, the concurrency cap and call budget, the cost bound on worst-case runs, a refuted-lemma scenario that converges after a re-run, a full simulated swarm, CLI, server and UI wiring
 * `tests/phase_rsi.py` rewritten (13 checks): Part I encounter masses, conservation of the total reserve, the Leak bound, gauge invariance, parser and seeded contradictions, drive behaviour, local-driver rule, LoRA clamp, event stream, weight-program validation, mix keep/rollback, editor routing
 * Fixed: mypy failure in `deepthink/cli.py` that stopped CI before the test suite ran
 * `python -m deepthink.nomosloop.benchmark` reports every example under every drive and fails on any posture regression

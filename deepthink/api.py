@@ -3,7 +3,7 @@ Public high-level API for open-deepthink algorithms.
 
 Prefer importing from the top-level package::
 
-    from deepthink import run_qnn, run_qdad, DistillationGraph, create_llm
+    from deepthink import run_theory, run_qnn, run_qdad, DistillationGraph, create_llm
 
 This module re-exports stable entry points so the library surface stays
 discoverable without pulling the optional web UI.
@@ -50,6 +50,15 @@ from deepthink.self_attention import (
 
 # ── Shared utils / state ─────────────────────────────────────────────────
 from deepthink.state import BRAINSTORM_EXPERTS, GraphState
+
+# ── Theory Synthesis (swarm of QNNs, one body of work) ───────────────────
+from deepthink.theory import (
+    TheoryLedger,
+    TheoryResult,
+    canonical_answer,
+    default_theory_params,
+    run_theory_pipeline,
+)
 from deepthink.utils import clean_and_parse_json, execute_code_in_sandbox
 
 LogFn = Callable[[str], Any] | None
@@ -80,6 +89,45 @@ async def run_qnn(
         document_context=document_context,
         chat_history=chat_history,
         log=log,
+        session_id=session_id,
+        session_store=session_store,
+    )
+
+
+async def run_theory(
+    llm,
+    problem: str,
+    params: dict[str, Any] | None = None,
+    *,
+    synthesis_llm=None,
+    member_llms: list[Any] | None = None,
+    member_models: list[str] | None = None,
+    document_context: str = "",
+    chat_history: list[dict] | None = None,
+    log: LogFn = None,
+    on_event=None,
+    session_id: str = "",
+    session_store: dict | None = None,
+) -> dict[str, Any]:
+    """
+    Run Theory Synthesis: a swarm of QNNs that decomposes a problem into easy cells,
+    solves them in parallel, synthesizes the proposals upward and votes, while every
+    cell writes into one consistent body of work.
+
+    For math problems, one olympiad (IMO-style) instance, algorithm design and physics.
+    Thin alias of :func:`deepthink.theory.run_theory_pipeline`.
+    """
+    return await run_theory_pipeline(
+        llm,
+        problem,
+        params=params,
+        synthesis_llm=synthesis_llm,
+        member_llms=member_llms,
+        member_models=member_models,
+        document_context=document_context,
+        chat_history=chat_history,
+        log=log,
+        on_event=on_event,
         session_id=session_id,
         session_store=session_store,
     )
@@ -212,6 +260,12 @@ async def run_distillation(
 
 __all__ = [
     # Algorithms
+    "run_theory",
+    "run_theory_pipeline",
+    "default_theory_params",
+    "TheoryResult",
+    "TheoryLedger",
+    "canonical_answer",
     "run_qnn",
     "run_qdad",
     "run_rsi",

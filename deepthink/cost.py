@@ -123,6 +123,108 @@ def estimate_qnn_cost(
     )
 
 
+def theory_tree_bound(max_depth: int, branching: int, max_cells: int) -> dict[str, int]:
+    """Worst-case calls for one QNN tree: decomposer calls, cells, and their sum.
+
+    A cell gets at most one decomposer call (only cells above ``max_depth``)
+    and exactly one solve or synthesis call, so the bound is provable rather
+    than a guess about how the model splits.
+    """
+    max_depth = max(0, int(max_depth))
+    branching = max(2, int(branching))
+    max_cells = max(1, int(max_cells))
+    full_upper = sum(branching**d for d in range(max_depth))  # cells above the depth limit
+    full_all = full_upper + branching**max_depth
+    decompose = min(max_cells, full_upper) if max_depth > 0 and max_cells > 1 else 0
+    cells = min(max_cells, full_all) if max_depth > 0 else 1
+    return {"decompose": decompose, "cells": cells, "total": decompose + cells}
+
+
+def estimate_theory_cost(
+    swarm_size: int = 5,
+    rounds: int = 2,
+    *,
+    layers: int = 3,
+    width: int = 3,
+    max_depth: int = 2,
+    branching: int = 3,
+    max_cells: int = 10,
+    verify: bool = True,
+    max_arbitrations: int = 4,
+    auto_size: bool = True,
+    has_document_context: bool = False,
+    polish: bool = False,
+    tokens_in: int = DEFAULT_TOKENS_IN,
+    tokens_out: int = DEFAULT_TOKENS_OUT,
+) -> CostEstimate:
+    """Upper bound on Theory Synthesis LLM calls.
+
+    Matches ``deepthink.theory.run_theory_pipeline``:
+
+    * optional brief (documents), optional sizer (auto topology, domain or answer type)
+    * 1 seed call, then one persona call per QNN
+    * per QNN per round: one decomposer call per split-able cell, one solve or
+      synthesis call per cell, and one verification
+    * per round: up to ``max_arbitrations`` conflict settlements in the body of work
+    * per extra round: 1 reframer call and one evolve-or-respawn call per dissenter
+    * optional write-up
+
+    Dissenters are bounded by the whole swarm. Early convergence, easy cells
+    and reused results all make real runs cheaper.
+    """
+    S = max(1, int(swarm_size))
+    R = max(1, int(rounds))
+    tree = theory_tree_bound(max_depth, branching, max_cells)
+    per_qnn = tree["total"] + (1 if verify else 0)
+    brief = 1 if has_document_context else 0
+    sizer = 1 if auto_size else 0
+    seeds = 1
+    spans = S
+    first = S * per_qnn
+    later = (R - 1) * S * per_qnn
+    dissent = (R - 1) * (1 + S)
+    arbitration = R * max(0, int(max_arbitrations))
+    write_up = 1 if polish else 0
+    calls = brief + sizer + seeds + spans + first + later + dissent + arbitration + write_up
+    notes = [
+        "Upper bound: converging early, easy cells and reused results cost less.",
+        "The vote, mirror descent and the body-of-work bookkeeping make no LLM calls.",
+        "Agreement between QNNs is not a proof; quality is unevaluated.",
+    ]
+    if calls > 300:
+        notes.append("This swarm is expensive. Start with 3–5 QNNs, depth 2 and 2 rounds.")
+    return CostEstimate(
+        kind="theory",
+        llm_calls=calls,
+        est_tokens_in=calls * tokens_in,
+        est_tokens_out=calls * tokens_out,
+        est_tokens_total=calls * (tokens_in + tokens_out),
+        breakdown={
+            "brief": brief,
+            "sizer": sizer,
+            "seeds": seeds,
+            "persona_spans": spans,
+            "round_1_qnn_calls": first,
+            "later_round_qnn_calls": later,
+            "dissent_evolve_reframe": dissent,
+            "arbitration": arbitration,
+            "write_up": write_up,
+        },
+        notes=notes,
+        topology={
+            "swarm_size": S,
+            "rounds": R,
+            "layers": int(layers),
+            "width": int(width),
+            "agents_total": S * int(layers) * int(width),
+            "max_depth": int(max_depth),
+            "branching": int(branching),
+            "max_cells": int(max_cells),
+            "tree_bound": tree,
+        },
+    )
+
+
 def estimate_qdad_cost(
     n: int = 3,
     denoising_steps: int = 2,

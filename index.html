@@ -14,6 +14,7 @@
     <link rel="stylesheet" href="css/node-chat.css">
     <link rel="stylesheet" href="css/theme.css?v=2">
     <link rel="stylesheet" href="css/rsi.css?v=2">
+    <link rel="stylesheet" href="css/theory.css?v=1">
 </head>
 
 <body>
@@ -60,7 +61,7 @@
     <div class="container">
         <div class="mode-tabs">
             <button class="mode-tab active" data-mode="app_slot_machine">🎰 App Slot Machine Mode</button>
-            <button class="mode-tab" data-mode="brainstorm">🧠 Brainstorming Mode</button>
+            <button class="mode-tab" data-mode="theory">∑ Theory Synthesis</button>
             <button class="mode-tab" data-mode="distillation">⚗️ Knowledge Distillation</button>
             <button class="mode-tab" data-mode="rsi">♾️ RSI Loop</button>
         </div>
@@ -302,50 +303,119 @@
         </div>
     </div>
 
-    <!-- Brainstorming Mode Container -->
-    <div class="container brainstorm-container hidden" id="brainstorm-mode">
-        <!-- ... existing brainstorm content ... -->
-        <div class="section">
+    <!-- Theory Synthesis Mode Container (formerly Brainstorming Mode) -->
+    <div class="container theory-container hidden" id="theory-mode">
+        <div class="section theory-controls">
             <div class="app-control-row">
                 <div class="app-control-group">
-                    <label for="brainstorm_epochs">Epochs</label>
-                    <input type="number" id="brainstorm_epochs" class="app-input--compact app-input--narrow" value="2" min="1" max="10">
+                    <label for="theory_domain">Domain</label>
+                    <select id="theory_domain" class="app-input--compact">
+                        <option value="auto" selected>Auto</option>
+                        <option value="math">Mathematics</option>
+                        <option value="olympiad">Olympiad (one IMO instance)</option>
+                        <option value="algorithms">Algorithm design</option>
+                        <option value="physics">Physics</option>
+                    </select>
                 </div>
                 <div class="app-control-group">
-                    <input type="checkbox" id="brainstorm_debug_mode">
-                    <label for="brainstorm_debug_mode">🚀 Simulation Mode (Mock LLM — No Cost)</label>
+                    <label for="theory_swarm_size">QNNs in the swarm</label>
+                    <input type="number" id="theory_swarm_size" class="app-input--compact app-input--narrow" value="5" min="1" max="128" step="1">
+                </div>
+                <div class="app-control-group">
+                    <label for="theory_rounds">Rounds</label>
+                    <input type="number" id="theory_rounds" class="app-input--compact app-input--narrow" value="2" min="1" max="10" step="1">
+                </div>
+                <div class="app-control-group">
+                    <label for="theory_quorum">Quorum</label>
+                    <input type="number" id="theory_quorum" class="app-input--compact app-input--narrow" value="0.5" min="0.05" max="1" step="0.05">
+                </div>
+                <div class="app-control-group">
+                    <input type="checkbox" id="theory_debug_mode">
+                    <label for="theory_debug_mode">🚀 Simulation Mode (Mock LLM — No Cost)</label>
                 </div>
             </div>
 
             <div class="app-subpanel">
-                <div class="app-subpanel__title">QNN Topology Mode</div>
+                <div class="app-subpanel__title">Each QNN: topology</div>
                 <div class="app-radio-group">
                     <label class="app-radio-label">
                         <input type="radio" name="qnn_size_mode" value="auto" checked id="qnn_auto">
-                        <span>Auto (recommended small 2–5 layers/width)</span>
+                        <span>Auto (sized per problem, at most 24 agents per QNN)</span>
                     </label>
                     <label class="app-radio-label app-radio-label--warn">
                         <input type="radio" name="qnn_size_mode" value="manual" id="qnn_manual">
-                        <span>Manual / Massive</span>
+                        <span>Manual</span>
                     </label>
                 </div>
                 <div id="manual-qnn-controls" class="app-divider hidden" style="gap: 0.75rem; align-items: center; flex-wrap: wrap;">
-                    <label class="app-hint">Layers (depth):
-                        <input type="number" id="manual_layers" class="app-input--compact app-input--medium" value="3" min="1" step="1">
+                    <label class="app-hint">Layers (layer 0 solves, the rest synthesize):
+                        <input type="number" id="manual_layers" class="app-input--compact app-input--medium" value="3" min="1" max="6" step="1">
                     </label>
                     <label class="app-hint">Width (agents per layer):
-                        <input type="number" id="manual_width" class="app-input--compact app-input--medium" value="3" min="1" step="1">
+                        <input type="number" id="manual_width" class="app-input--compact app-input--medium" value="3" min="1" max="8" step="1">
                     </label>
-                    <span class="app-hint app-hint--danger">⚠️ Each extra layer×width×epoch is more LLM calls. Start 2×2×1 or 3×3×2. Auto mode caps at 24 agents.</span>
-                    <span class="app-hint" id="qnn-cost-estimate">Est. LLM calls: —</span>
                 </div>
             </div>
 
-            <div class="mem-calc-panel" id="brainstorm-mem-calc"
-                data-watch="manual_layers,manual_width,brainstorm_epochs,brainstorm-ram-gb">
+            <div class="app-subpanel">
+                <div class="app-subpanel__title">Descent: split the problem into cells until each is easy for a solver</div>
+                <div class="app-divider" style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+                    <label class="app-hint">Max depth
+                        <input type="number" id="theory_max_depth" class="app-input--compact" value="2" min="0" max="4" step="1">
+                    </label>
+                    <label class="app-hint">Branching
+                        <input type="number" id="theory_branching" class="app-input--compact" value="3" min="2" max="6" step="1">
+                    </label>
+                    <label class="app-hint">Easiness τ
+                        <input type="number" id="theory_easiness" class="app-input--compact" value="0.75" min="0.05" max="1" step="0.05">
+                    </label>
+                    <label class="app-hint">Cells per QNN
+                        <input type="number" id="theory_max_cells" class="app-input--compact" value="10" min="1" max="64" step="1">
+                    </label>
+                </div>
+            </div>
+
+            <div class="app-subpanel">
+                <div class="app-subpanel__title">Convergence and the body of work</div>
+                <div class="app-divider" style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+                    <label class="app-hint">Vote
+                        <select id="theory_vote" class="app-input--compact">
+                            <option value="weighted" selected>Weighted (mirror descent × checks)</option>
+                            <option value="plurality">Plurality (most common answer)</option>
+                        </select>
+                    </label>
+                    <label class="app-hint">Learning rate η
+                        <input type="number" id="theory_lr" class="app-input--compact" value="1.0" min="0" max="8" step="0.1">
+                    </label>
+                    <label class="app-hint">Body of work
+                        <select id="theory_ledger" class="app-input--compact">
+                            <option value="shared" selected>Shared by every QNN</option>
+                            <option value="private">Private to each QNN</option>
+                        </select>
+                    </label>
+                    <label class="app-hint"><input type="checkbox" id="theory_verify" checked> Verify proposals</label>
+                    <label class="app-hint">Parallel calls
+                        <input type="number" id="theory_concurrency" class="app-input--compact" value="8" min="1" max="64" step="1">
+                    </label>
+                    <label class="app-hint" title="0 means no cap">Max LLM calls
+                        <input type="number" id="theory_max_calls" class="app-input--compact" value="0" min="0" step="10">
+                    </label>
+                    <label class="app-hint">Temperature
+                        <input type="number" id="theory_temp_min" class="app-input--compact" placeholder="min" min="0" max="2" step="0.1">
+                        –
+                        <input type="number" id="theory_temp_max" class="app-input--compact" placeholder="max" min="0" max="2" step="0.1">
+                    </label>
+                    <label class="app-hint"><input type="checkbox" id="theory_polish"> Polish the report (1 call)</label>
+                </div>
+                <div class="app-hint" id="theory-cost-estimate" style="margin-top: 0.5rem;">Est. LLM calls: —</div>
+                <div class="app-hint">Per-Agent Models in the settings make a mixed-model swarm: QNNs take them in turn.</div>
+            </div>
+
+            <div class="mem-calc-panel" id="theory-mem-calc"
+                data-watch="manual_layers,manual_width,theory_rounds,theory_swarm_size,theory-ram-gb">
                 <div class="app-hint" style="margin-bottom: 0.5rem;">
                     Laptop RAM:
-                    <input type="number" id="brainstorm-ram-gb" class="mem-calc-ram-input" value="8" min="1" max="256" step="1"> GB
+                    <input type="number" id="theory-ram-gb" class="mem-calc-ram-input" value="8" min="1" max="256" step="1"> GB
                 </div>
             </div>
 
@@ -371,13 +441,7 @@
 
         <div class="mode-workspace">
             <div class="section mode-vortex-section">
-                <div class="mode-vortex-panel-shell" id="brainstorm-vortex-panel">
-                    <div class="mode-vortex-idle">
-                        <span class="mode-vortex-idle__glyph">◎</span>
-                        <span class="mode-vortex-idle__title">Diffusion Vortex</span>
-                        <span class="mode-vortex-idle__hint">Spins when a brainstorm run starts</span>
-                    </div>
-                </div>
+                <div class="swarm-panel" id="theory-swarm-panel"></div>
             </div>
             <div class="section section--chat-mount mode-chat-section">
                 <div id="node-chat-container" style="height: 550px;"></div>
@@ -523,6 +587,7 @@
     <script src="js/components/vortex-animation.js?v=4"></script>
     <script src="js/components/rsi-lattice.js?v=2"></script>
     <script src="js/components/rsi-mode.js?v=2"></script>
+    <script src="js/components/theory-swarm.js?v=1"></script>
     <script>
         const APP_COLORS = {
             user: '#a78bfa',
@@ -532,17 +597,22 @@
             info: '#06b6d4',
         };
 
-        /** True while a brainstorm / slot-machine graph is in flight. */
+        /** True while a theory-synthesis / slot-machine graph is in flight. */
         let graphRunActive = false;
+        if (typeof TheorySwarm !== 'undefined') TheorySwarm.mount('theory-swarm-panel');
 
         function startVortexForMode(mode) {
             if (typeof VortexAnimation === 'undefined') return;
             graphRunActive = true;
             if (mode === 'app_slot_machine') {
                 VortexAnimation.play({ container: 'qdad-vortex-panel', label: 'Synthesizing' });
-            } else if (mode === 'brainstorm') {
-                VortexAnimation.play({ container: 'brainstorm-vortex-panel', label: 'Brainstorming' });
             }
+        }
+
+        function startSwarmForMode(mode) {
+            if (mode !== 'theory') return;
+            graphRunActive = true;
+            if (typeof TheorySwarm !== 'undefined') TheorySwarm.start();
         }
 
         /** Only stops vortex when a graph run was active (ignores SSE blips). */
@@ -552,6 +622,7 @@
             if (typeof VortexAnimation !== 'undefined') {
                 VortexAnimation.stop({ fade: true });
             }
+            if (typeof TheorySwarm !== 'undefined') TheorySwarm.stop();
             if (reason) console.log('[vortex] stop:', reason);
         }
 
@@ -726,7 +797,7 @@
                 tab.classList.add('active');
 
                 // Re-fetch elements to be safe
-                const bs = document.getElementById('brainstorm-mode');
+                const bs = document.getElementById('theory-mode');
                 const slot = document.getElementById('app-slot-machine-mode');
                 const distil = document.getElementById('distillation-mode');
                 const rsi = document.getElementById('rsi-mode');
@@ -741,7 +812,7 @@
                     }
                 });
 
-                if (mode === 'brainstorm') {
+                if (mode === 'theory') {
                     if (bs) {
                         bs.classList.remove('hidden');
                         bs.classList.add('active');
@@ -767,7 +838,7 @@
                 const globalLogComp = document.getElementById('log-wrapper');
                 const globalGraphComp = document.getElementById('graph-wrapper');
 
-                if (mode === 'brainstorm' || mode === 'app_slot_machine') {
+                if (mode === 'theory' || mode === 'app_slot_machine') {
                     if (globalPerplexity) globalPerplexity.classList.remove('hidden');
                     if (globalLogComp) globalLogComp.classList.remove('hidden');
                     if (globalGraphComp) globalGraphComp.classList.remove('hidden');
@@ -1020,7 +1091,7 @@
         let importedSessionId = null;
         let importedStateContent = null;
 
-        // Brainstorm mode state - chat history and document context
+        // Theory Synthesis state (variables keep their old brainstorm names) - chat history and document context
         let brainstormChatHistory = [];  // Array of {role: 'user'|'assistant', content: string}
         let brainstormDocumentContext = '';  // Combined extracted text from PDFs + code files
         let attachedDocuments = [];  // PDFs: {filename, text, char_count, type: 'pdf'}
@@ -1031,7 +1102,7 @@
         let qdadRepositories = [];
         let qdadDocumentContext = '';
         let qdadChatHistory = [];
-        let nodeChatInstance = null;  // Brainstorm NodeChat
+        let nodeChatInstance = null;  // Theory Synthesis NodeChat
         let qdadChatInstance = null;  // App Slot Machine NodeChat
 
         function formatRepoContext(repo) {
@@ -1047,6 +1118,8 @@
             );
             const repoParts = attachedRepositories.map(formatRepoContext);
             brainstormDocumentContext = [...pdfParts, ...codeParts, ...repoParts].join('\n\n---\n\n');
+            // Attachments add a brief call: refresh the Theory Synthesis cost line.
+            document.getElementById('theory_swarm_size')?.dispatchEvent(new Event('input'));
         }
 
         function rebuildQdadContext() {
@@ -1117,7 +1190,7 @@
             };
         }
 
-        // Attachment upload elements (brainstorm)
+        // Attachment upload elements (Theory Synthesis)
         const pdfFileInput = document.getElementById('pdf-file-input');
         const codeFileInput = document.getElementById('code-file-input');
         const repoFolderInput = document.getElementById('repo-folder-input');
@@ -1361,10 +1434,10 @@
         // Mode switching and API key elements
         const modeTabs = document.querySelectorAll('.mode-tabs > .mode-tab');
         const appSlotMachineMode = document.getElementById('app-slot-machine-mode');
-        const brainstormMode = document.getElementById('brainstorm-mode');
+        const theoryMode = document.getElementById('theory-mode');
         const saveApiKeyBtn = document.getElementById('save-api-key-btn');
         const apiKeyStatus = document.getElementById('api-key-status');
-        // NodeChat replaces #brainstorm-chat, #brainstorm-form, and #brainstorm-input
+        // NodeChat (#node-chat-container) is the Theory Synthesis chat
         // Initialize after DOM references are set up (see below)
         const llmProviderSelect = document.getElementById('llm-provider');
         const openrouterConfig = document.getElementById('openrouter-config');
@@ -1444,7 +1517,7 @@
                 modeTabs.forEach(t => t.classList.remove('active'));
                 tab.classList.add('active');
                 const mode = tab.dataset.mode;
-                const bs = document.getElementById('brainstorm-mode');
+                const bs = document.getElementById('theory-mode');
                 const slot = document.getElementById('app-slot-machine-mode');
                 const distil = document.getElementById('distillation-mode');
 
@@ -1455,7 +1528,7 @@
                     }
                 });
 
-                if (mode === 'brainstorm') {
+                if (mode === 'theory') {
                     if (bs) { bs.classList.remove('hidden'); bs.classList.add('active'); }
                 } else if (mode === 'app_slot_machine') {
                     if (slot) { slot.classList.remove('hidden'); slot.classList.add('active'); }
@@ -1465,13 +1538,49 @@
             });
         });
 
-        // Initialize NodeChat component in the brainstorm container
+        /** Read every Theory Synthesis control into request params. */
+        function readTheoryParams() {
+            const num = (id, fallback) => {
+                const raw = document.getElementById(id)?.value;
+                const v = parseFloat(raw);
+                return Number.isFinite(v) ? v : fallback;
+            };
+            const opt = (id) => {
+                const raw = document.getElementById(id)?.value;
+                return raw === undefined || raw === '' ? null : parseFloat(raw);
+            };
+            const qnnMode = document.querySelector('input[name="qnn_size_mode"]:checked')?.value || 'auto';
+            return {
+                domain: document.getElementById('theory_domain')?.value || 'auto',
+                swarm_size: Math.round(num('theory_swarm_size', 5)),
+                rounds: Math.round(num('theory_rounds', 2)),
+                quorum: num('theory_quorum', 0.5),
+                vote: document.getElementById('theory_vote')?.value || 'weighted',
+                learning_rate: num('theory_lr', 1.0),
+                qnn_mode: qnnMode,
+                manual_layers: Math.round(num('manual_layers', 3)),
+                manual_width: Math.round(num('manual_width', 3)),
+                max_depth: Math.round(num('theory_max_depth', 2)),
+                branching: Math.round(num('theory_branching', 3)),
+                easiness: num('theory_easiness', 0.75),
+                max_cells: Math.round(num('theory_max_cells', 10)),
+                ledger: document.getElementById('theory_ledger')?.value || 'shared',
+                verify: !!document.getElementById('theory_verify')?.checked,
+                concurrency: Math.round(num('theory_concurrency', 8)),
+                max_calls: Math.round(num('theory_max_calls', 0)),
+                temperature_min: opt('theory_temp_min'),
+                temperature_max: opt('theory_temp_max'),
+                polish: !!document.getElementById('theory_polish')?.checked,
+            };
+        }
+
+        // Initialize NodeChat component in the Theory Synthesis container
         // Ensure container is visible before init if necessary, or just init
         if (document.getElementById('node-chat-container')) {
             nodeChatInstance = NodeChat.init('node-chat-container', {
-                title: 'Brainstorm',
-                subtitle: 'QNN expert panel — layered epochs, Mirror Descent, solution-space map',
-                placeholder: 'What would you like the QNN to explore?',
+                title: 'Theory Synthesis',
+                subtitle: 'A swarm of QNNs: split into easy cells, solve in parallel, synthesize upward, vote. Every cell writes into one body of work.',
+                placeholder: 'State one problem: an IMO-style instance, a proof, an algorithm to design, a physics question…',
                 onSend: async (message, chat) => {
                     const provider = localStorage.getItem('llm_provider') || 'openrouter';
                     const openrouterApiKey = localStorage.getItem('openrouter_api_key');
@@ -1484,8 +1593,10 @@
                     const llamacppModel = localStorage.getItem('llamacpp_model') || 'llama-3.2-1b-instruct';
 
 
-                    if (provider === 'openrouter' && !openrouterApiKey) {
-                        alert('Please save your OpenRouter API key in the settings panel first.');
+                    // Simulation Mode uses CoderMockLLM server-side, so no API key is needed.
+                    const theoryDebugMode = !!document.getElementById('theory_debug_mode')?.checked;
+                    if (!theoryDebugMode && provider === 'openrouter' && !openrouterApiKey) {
+                        alert('Please save your OpenRouter API key in the settings panel first.\n\nOr enable Simulation Mode (Mock LLM) to run without a key.');
                         chat.finishStreaming();
                         return;
                     }
@@ -1496,7 +1607,7 @@
                     logContainer.innerHTML = '';
                     fullLogContent = '';
 
-                    // Hide Graph for Brainstorm
+                    // Hide Graph for Theory Synthesis (the swarm panel shows progress)
                     graphContainer.parentElement.style.display = 'none';
 
                     addLogMessage(`<strong>User:</strong> ${message}`, { isHTML: true, color: APP_COLORS.user });
@@ -1504,9 +1615,7 @@
                     // Determine the correct API key for the selected provider
                     let selectedApiKey = openrouterApiKey;
 
-                    const qnnModeRadio = document.querySelector('input[name="qnn_size_mode"]:checked');
-                    const qnnMode = qnnModeRadio ? qnnModeRadio.value : 'auto';
-                    const params = {
+                    const params = Object.assign({
                         prompt: message,
                         provider: provider,
                         api_key: selectedApiKey,
@@ -1518,28 +1627,19 @@
                         llamacpp_model: llamacppModel,
                         synthesis_model: synthesisModel,
                         agent_models: agentModels,
-                        vector_word_size: 2,
-                        prompt_alignment: 1.0,
-                        density: 1.0,
-                        learning_rate: 0.1,
-                        num_epochs: parseInt(document.getElementById('brainstorm_epochs')?.value) || 2,
-                        coder_debug_mode: document.getElementById('brainstorm_debug_mode').checked ? 'true' : 'false',
-                        // support for user-requested massive QNN in brainstorming
-                        qnn_mode: qnnMode,
-                        manual_layers: parseInt(document.getElementById('manual_layers')?.value) || 5,
-                        manual_width: parseInt(document.getElementById('manual_width')?.value) || 5
-                    };
+                        coder_debug_mode: document.getElementById('theory_debug_mode').checked ? 'true' : 'false',
+                    }, readTheoryParams());
 
                     try {
                         await runGraph({
                             params: params,
-                            mode: 'brainstorm',
+                            mode: 'theory',
                             chat_history: brainstormChatHistory,
                             document_context: brainstormDocumentContext
                         }, '/build_and_run_graph', false);
                         // Note: finishStreaming will be called by the FINAL_ANSWER SSE handler
                     } catch (error) {
-                        addLogMessage(`Error initiating brainstorming: ${error.message}`, { color: 'red' });
+                        addLogMessage(`Error starting Theory Synthesis: ${error.message}`, { color: 'red' });
                         chat.removeThinking();
                         chat.finishStreaming();
                     }
@@ -1586,7 +1686,7 @@
 
 
 
-            // Setup QNN size mode toggle for Auto vs Manual/Massive in Brainstorming
+            // Setup the per-QNN topology toggle (Auto vs Manual) in Theory Synthesis
             const setupQnnModeToggle = () => {
                 const autoRadio = document.getElementById('qnn_auto');
                 const manualRadio = document.getElementById('qnn_manual');
@@ -1604,13 +1704,23 @@
             };
             setupQnnModeToggle();
 
-            const estimateQnnCalls = (layers, width, epochs, isAuto) => {
-                const L = Math.max(1, layers || 3);
-                const W = Math.max(1, width || 3);
-                const E = Math.max(1, epochs || 2);
-                const agents = L * W;
-                const complexity = isAuto ? 1 : 0;
-                return 3 + complexity + (2 * E) + (2 * E * agents);
+            // Mirrors deepthink.cost.estimate_theory_cost (an upper bound).
+            const estimateTheoryCalls = (p) => {
+                const S = Math.max(1, p.swarm_size || 5);
+                const R = Math.max(1, p.rounds || 2);
+                const D = Math.max(0, p.max_depth || 0);
+                const b = Math.max(2, p.branching || 3);
+                const N = Math.max(1, p.max_cells || 10);
+                let upper = 0;
+                for (let d = 0; d < D; d++) upper += Math.pow(b, d);
+                const all = upper + Math.pow(b, D);
+                const dec = (D > 0 && N > 1) ? Math.min(N, upper) : 0;
+                const cells = D > 0 ? Math.min(N, all) : 1;
+                const perQnn = dec + cells + (p.verify ? 1 : 0);
+                const arb = R * 4;
+                // brief (attachments) + sizer (the UI always leaves answer_type on auto) + seeds
+                const brief = (typeof brainstormDocumentContext === 'string' && brainstormDocumentContext) ? 1 : 0;
+                return brief + 1 + 1 + S + R * S * perQnn + (R - 1) * (1 + S) + arb + (p.polish ? 1 : 0);
             };
             const estimateQdadCalls = (n, steps) => {
                 const N = Math.max(2, n || 3);
@@ -1618,16 +1728,12 @@
                 return 2 + N * N * (1 + S);
             };
             const refreshCostHints = () => {
-                const el = document.getElementById('qnn-cost-estimate');
+                const el = document.getElementById('theory-cost-estimate');
                 if (el) {
-                    const isAuto = document.getElementById('qnn_auto')?.checked;
-                    const L = parseInt(document.getElementById('manual_layers')?.value, 10) || 3;
-                    const W = parseInt(document.getElementById('manual_width')?.value, 10) || 3;
-                    const E = parseInt(document.getElementById('brainstorm_epochs')?.value, 10) || 2;
-                    const calls = isAuto
-                        ? 'auto (typically 9–45; cap 24 agents)'
-                        : String(estimateQnnCalls(L, W, E, false));
-                    el.textContent = `Est. LLM calls: ${calls}`;
+                    const p = readTheoryParams();
+                    let calls = estimateTheoryCalls(p);
+                    const cap = p.max_calls > 0 ? ` (capped at ${p.max_calls})` : '';
+                    el.textContent = `Est. LLM calls: at most ${calls}${cap}. Early convergence, easy cells and reused results cost less.`;
                 }
                 const qel = document.getElementById('qdad-cost-estimate');
                 if (qel) {
@@ -1636,8 +1742,11 @@
                     qel.textContent = `Est. LLM calls: ${estimateQdadCalls(n, s)}`;
                 }
             };
-            ['manual_layers', 'manual_width', 'brainstorm_epochs', 'qdad_grid_size', 'qdad_denoising_steps'].forEach((id) => {
+            ['manual_layers', 'manual_width', 'qdad_grid_size', 'qdad_denoising_steps',
+             'theory_swarm_size', 'theory_rounds', 'theory_max_depth', 'theory_branching',
+             'theory_max_cells', 'theory_max_calls', 'theory_verify', 'theory_polish'].forEach((id) => {
                 document.getElementById(id)?.addEventListener('input', refreshCostHints);
+                document.getElementById(id)?.addEventListener('change', refreshCostHints);
             });
             document.getElementById('qnn_auto')?.addEventListener('change', refreshCostHints);
             document.getElementById('qnn_manual')?.addEventListener('change', refreshCostHints);
@@ -1649,20 +1758,21 @@
             const getMbtiCount = () =>
                 document.querySelectorAll('input[name="mbti_archetypes"]:checked').length;
 
-            const brainstormMemCalc = QnnMemoryCalculator.init('brainstorm-mem-calc', () => {
+            const theoryMemCalc = QnnMemoryCalculator.init('theory-mem-calc', () => {
                 const qnnMode = document.querySelector('input[name="qnn_size_mode"]:checked')?.value || 'auto';
-                const epochs = parseInt(document.getElementById('brainstorm_epochs')?.value) || 2;
-                const ramGb = parseFloat(document.getElementById('brainstorm-ram-gb')?.value) || 8;
+                const epochs = parseInt(document.getElementById('theory_rounds')?.value) || 2;
+                const swarm = Math.max(1, parseInt(document.getElementById('theory_swarm_size')?.value) || 5);
+                const ramGb = parseFloat(document.getElementById('theory-ram-gb')?.value) || 8;
                 if (qnnMode === 'manual') {
                     return {
                         width: parseInt(document.getElementById('manual_width')?.value) || 1,
-                        height: parseInt(document.getElementById('manual_layers')?.value) || 1,
+                        height: (parseInt(document.getElementById('manual_layers')?.value) || 1) * swarm,
                         epochs,
                         mode: 'brainstorm',
                         ramGb,
                         isLocalModel: getProviderIsLocal(),
                         widthLabel: 'Width',
-                        heightLabel: 'Layers',
+                        heightLabel: 'Layers × QNNs',
                     };
                 }
                 return {
@@ -1670,7 +1780,7 @@
                     mode: 'brainstorm',
                     ramGb,
                     isLocalModel: getProviderIsLocal(),
-                    autoRange: { minW: 2, maxW: 5, minH: 2, maxH: 5 },
+                    autoRange: { minW: 2, maxW: 5, minH: 2 * swarm, maxH: 4 * swarm },
                 };
             });
 
@@ -1868,10 +1978,12 @@
         }
 
         async function runGraph(payload, endpointUrl, clearLogs = true) {
-            // Vortex side panel for Slot Machine + Brainstorm — spins until endGraphRun()
+            // Vortex for Slot Machine, swarm panel for Theory Synthesis — both run until endGraphRun()
             const mode = (payload && payload.mode) || (payload && payload.params && payload.params.mode) || '';
-            if (mode === 'app_slot_machine' || mode === 'brainstorm') {
+            if (mode === 'app_slot_machine') {
                 startVortexForMode(mode);
+            } else if (mode === 'theory') {
+                startSwarmForMode(mode);
             }
 
             if (runButton) {
@@ -2126,6 +2238,18 @@
         eventSource.onmessage = function (event) {
             const rawMessage = event.data;
 
+            // Theory Synthesis: structured swarm events go to the swarm panel.
+            const swarmAt = rawMessage.indexOf('SWARM_EVENT:');
+            if (swarmAt !== -1 && swarmAt < 12) {
+                try {
+                    const evt = JSON.parse(rawMessage.slice(swarmAt + 'SWARM_EVENT:'.length));
+                    if (typeof TheorySwarm !== 'undefined') TheorySwarm.handle(evt);
+                } catch (e) {
+                    console.error('Bad SWARM_EVENT', e);
+                }
+                return;
+            }
+
             // RSI loop: structured live events go to the lattice, never the chat.
             const rsiAt = rawMessage.indexOf('RSI_EVENT:');
             if (rsiAt !== -1 && rsiAt < 12) {
@@ -2222,7 +2346,7 @@
                     );
 
                     // Route FINAL_ANSWER into the active NodeChat (brainstorm or app slot machine)
-                    if (answer.mode === 'app_slot_machine' || (qdadChatInstance && answer.mode !== 'brainstorm' && document.getElementById('app-slot-machine-mode')?.classList.contains('active'))) {
+                    if (answer.mode === 'app_slot_machine' || (qdadChatInstance && !['brainstorm', 'theory'].includes(answer.mode) && document.getElementById('app-slot-machine-mode')?.classList.contains('active'))) {
                         let displayText = '';
                         if (typeof answer === 'object' && answer !== null) {
                             if (answer.proposed_solution) displayText = answer.proposed_solution;
@@ -2241,7 +2365,7 @@
                         if (exportQnnButton) exportQnnButton.classList.remove('hidden');
                         addLogMessage(`<strong>✅ QDAD synthesis complete.</strong>`, { isHTML: true, color: 'lime' });
                         endGraphRun('final-answer-qdad');
-                    } else if (answer.mode === 'brainstorm' || nodeChatInstance) {
+                    } else if (answer.mode === 'theory' || answer.mode === 'brainstorm' || nodeChatInstance) {
                         let displayText = '';
                         if (typeof answer === 'object' && answer !== null) {
                             if (answer.proposed_solution) displayText = answer.proposed_solution;
@@ -2250,7 +2374,8 @@
                             displayText = String(answer);
                         }
 
-                        displayText = (isIntermediateEpochMap ? '🧭 **Epoch Map**\n\n' : '🧠 **Synthesis**\n\n') + displayText;
+                        const finalHeader = answer.mode === 'theory' ? '' : '🧠 **Synthesis**\n\n';
+                        displayText = (isIntermediateEpochMap ? '🧭 **Epoch Map**\n\n' : finalHeader) + displayText;
 
                         if (nodeChatInstance) {
                             nodeChatInstance.appendAIMessage(displayText);
@@ -2262,7 +2387,7 @@
                             addLogMessage(displayText, { isHTML: true });
                         }
                         if (!isIntermediateEpochMap) {
-                            endGraphRun('final-answer-brainstorm');
+                            endGraphRun(answer.mode === 'theory' ? 'final-answer-theory' : 'final-answer-brainstorm');
                         }
                     } else {
                         // Unknown shape — treat as terminal so UI doesn't spin forever
@@ -2307,6 +2432,8 @@
                 const msg = rawMessage.toLowerCase();
                 if (
                     msg.includes('brainstorm graph execution completed')
+                    || msg.includes('theory synthesis complete')
+                    || msg.includes('theory synthesis graph background error')
                     || msg.includes('app slot machine (qdad) completed')
                     || msg.includes('qdad) langgraph execution completed')
                     || msg.includes('graph background error')
@@ -2314,6 +2441,12 @@
                     || msg === 'success: graph execution completed.'
                 ) {
                     endGraphRun('log:' + rawMessage.slice(0, 80));
+                }
+                // A failed Theory Synthesis run never sends FINAL_ANSWER: release the chat.
+                if (msg.includes('theory synthesis graph background error') && nodeChatInstance) {
+                    nodeChatInstance.removeThinking();
+                    nodeChatInstance.appendAIMessage('∑ **Theory Synthesis failed.** ' + rawMessage.replace(/^ERROR:\s*/, ''));
+                    nodeChatInstance.finishStreaming();
                 }
             }
 

@@ -24,6 +24,25 @@ There is no gradient, no softmax, no matrix multiply. Self-attention does
 **not** call an LLM; it is a capped token-overlap ranker
 (`deepthink/self_attention.py`).
 
+## Theory Synthesis
+
+| Name in the UI / code | Actual operation |
+|---|---|
+| Swarm | S independent QNN runs under one concurrency cap (`asyncio.Semaphore`) |
+| Descent / cell | An LLM rates a cell's easiness for the best-matching solver and splits it into subcells |
+| Ascent | Leaves solved in parallel; each tree height collapsed by the synthesizer layer of the same height |
+| Body of work | A ledger: string normalisation and token Jaccard to merge results, canonical answers to detect conflicts, an LLM arbiter to settle them, dependency closure to taint |
+| Self-attention over the body of work | Token overlap between a cell and ledger entries, boosted by status; top-k injected into the prompt |
+| Easiness, verifier score, arbiter verdict | Model judgments, not measurements |
+| Vote | Canonical-answer clusters; mass Σ wᵢqᵢ, support Σ wᵢ |
+| Mirror descent (swarm weights) | **The real algorithm:** one entropic mirror-descent step on the simplex, `wᵢ ← wᵢ·exp(−ηℓᵢ)/Z` |
+| Mirror Descent (personas) | As in the QNN: an LLM rewrites a dissenting QNN's prompts, more strongly for a larger loss |
+| Reframe | An LLM proposes another representation of the same problem, without seeing any answer |
+
+Agreement measures how much of the swarm backs an answer. With a shared body
+of work the votes are correlated, so agreement is not a confidence level, and
+it is never a proof.
+
 ## Qualitative Diffusion (QDAD)
 
 | Name | Actual operation |
