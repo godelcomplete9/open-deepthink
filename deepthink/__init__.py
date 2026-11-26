@@ -26,9 +26,9 @@ from __future__ import annotations
 
 from typing import Any
 
-__version__ = "0.3.0"
-__release_name__ = "honest-engine"
-__release_tag__ = "0.3.0"
+__version__ = "0.4.0"
+__release_name__ = "theory-synthesis"
+__release_tag__ = "0.4.0"
 
 # Lightweight imports — always safe, no LangChain graph spin-up
 from deepthink.state import BRAINSTORM_EXPERTS, GraphState
