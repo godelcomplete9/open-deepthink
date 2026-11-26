@@ -43,7 +43,7 @@ from deepthink.chains import (
     get_seed_generation_chain,
     get_synthesis_chain,
 )
-from deepthink.cost import estimate_qdad_cost, estimate_qnn_cost
+from deepthink.cost import estimate_qdad_cost, estimate_qnn_cost, estimate_theory_cost
 from deepthink.knowledge_distillation import DistillationGraph
 from deepthink.mocks import CoderMockLLM, DistillationMockLLM, MockLLM
 from deepthink.models import ChatLlamaCpp
@@ -65,6 +65,7 @@ from deepthink.runtime.nodes import (
 from deepthink.self_attention import compute_self_attention
 from deepthink.sessions import SessionStore
 from deepthink.state import GraphState
+from deepthink.theory import clamp_theory_params, run_theory_pipeline
 from deepthink.utils import clean_and_parse_json, execute_code_in_sandbox
 from dotenv import load_dotenv
 from fastapi import Body, FastAPI, File, Form, Request, UploadFile
@@ -357,6 +358,45 @@ async def run_qnn_background(
     )
 
 
+async def run_theory_background(
+    llm,
+    synthesis_llm,
+    params,
+    user_prompt: str,
+    session_id: str,
+    document_context: str = "",
+    chat_history=None,
+    member_llms=None,
+    member_models=None,
+):
+    """
+    Theory Synthesis background runner.
+
+    Delegates to deepthink.theory.run_theory_pipeline (same engine as `deepthink theory`).
+    """
+
+    async def _log(msg: str):
+        await log_stream.put(msg)
+
+    try:
+        await run_theory_pipeline(
+            llm,
+            user_prompt or "",
+            params=params or {},
+            synthesis_llm=synthesis_llm,
+            member_llms=member_llms,
+            member_models=member_models,
+            document_context=document_context or "",
+            chat_history=chat_history or [],
+            log=_log,
+            session_id=session_id,
+            session_store=sessions,
+        )
+    except Exception as e:
+        await log_stream.put(f"ERROR: Theory Synthesis graph background error: {e}")
+        await log_stream.put(traceback.format_exc())
+
+
 async def run_qdad_background(
     llm,
     synthesis_llm,
@@ -442,7 +482,11 @@ async def build_and_run_graph(payload: dict = Body(...)):
         )
 
         if is_debug:
-            if mode == "app_slot_machine":
+            if mode == "theory":
+                await log_stream.put(
+                    "--- ∑ THEORY SYNTHESIS SIMULATION MODE (CoderMockLLM — no API cost) ---"
+                )
+            elif mode == "app_slot_machine":
                 await log_stream.put(
                     "--- 🎰 APP SLOT MACHINE DEBUG MODE ENABLED "
                     "(CoderMockLLM / QDAD — no API cost) 🎰 ---"
@@ -575,7 +619,15 @@ async def build_and_run_graph(payload: dict = Body(...)):
         await log_stream.put(f"LOG: Context attached to prompt ({len(capped_context)} characters).")
 
     await log_stream.put(f"--- Starting Graph Build and Run Process (Mode: {mode}) ---")
-    await log_stream.put(f"Parameters: {params}")
+    safe_params = {
+        k: (
+            "***"
+            if v and any(t in str(k).lower() for t in ("key", "token", "secret", "password"))
+            else v
+        )
+        for k, v in params.items()
+    }
+    await log_stream.put(f"Parameters: {safe_params}")
 
     # ── App Slot Machine (QDAD): dedicated qualitative diffusion pipeline ──
     if mode == "app_slot_machine":
@@ -634,6 +686,98 @@ async def build_and_run_graph(payload: dict = Body(...)):
             }
         )
 
+    # ── Theory Synthesis: a swarm of QNNs that builds one body of work ──
+    if mode == "theory":
+        theory_params = clamp_theory_params(params)
+        member_llms = None
+        member_models = None
+        if agent_model_list and not is_debug:
+            member_models = agent_model_list[:16]
+            member_llms = []
+            for model_name in member_models:
+                if provider == "openrouter":
+                    member_llms.append(
+                        ChatOpenAI(
+                            model=model_name,
+                            openai_api_key=api_key,
+                            openai_api_base=cfg.openrouter_base_url,
+                            temperature=cfg.temperature,
+                            callbacks=[token_tracker],
+                        )
+                    )
+                else:
+                    member_llms.append(
+                        ChatLlamaCpp(
+                            base_url=llamacpp_url,
+                            api_key=llamacpp_api_key,
+                            model=model_name,
+                            temperature=cfg.temperature,
+                            max_tokens=cfg.max_tokens,
+                        )
+                    )
+            await log_stream.put(
+                f"--- Mixed-model swarm: {len(member_models)} model(s) assigned to QNNs round-robin ---"
+            )
+        separate_synth = synthesis_llm if (synthesis_model and synthesis_llm is not llm) else None
+        session_id = str(uuid.uuid4())
+        sessions[session_id] = {
+            "session_id": session_id,
+            "mode": "theory",
+            "original_request": user_prompt,
+            "params": theory_params,
+            "final_solution": None,
+            "all_rag_documents": [],
+            "all_layers_prompts": [],
+            "agent_personas": {},
+            "agent_outputs": {},
+            "memory": {},
+            "epoch": 0,
+            "max_epochs": theory_params["rounds"],
+            "raptor_index": None,
+            "theory": {},
+        }
+        await log_stream.put(f"__session_id__ {session_id}")
+        await log_stream.put(
+            "__start__ Theory Synthesis swarm\n"
+            "  Seeds → personas (each QNN) → descent into easy cells\n"
+            "  → solve leaves in parallel → synthesize upward → verify\n"
+            "  → body of work (merge, conflicts, arbitration) → vote → mirror descent"
+        )
+        theory_est = estimate_theory_cost(
+            swarm_size=theory_params["swarm_size"],
+            rounds=theory_params["rounds"],
+            layers=theory_params["manual_layers"],
+            width=theory_params["manual_width"],
+            max_depth=theory_params["max_depth"],
+            branching=theory_params["branching"],
+            max_cells=theory_params["max_cells"],
+            verify=theory_params["verify"],
+            max_arbitrations=theory_params["max_arbitrations"],
+            has_document_context=bool(document_context),
+            polish=theory_params["polish"],
+        )
+        await log_stream.put(f"LOG: [COST] {theory_est.summary_line()} (upper bound)")
+        asyncio.create_task(
+            run_theory_background(
+                llm=llm,
+                synthesis_llm=separate_synth,
+                params=theory_params,
+                user_prompt=user_prompt or "",
+                session_id=session_id,
+                document_context=document_context or "",
+                chat_history=payload.get("chat_history", []) or [],
+                member_llms=member_llms,
+                member_models=member_models,
+            )
+        )
+        return JSONResponse(
+            content={
+                "message": "Graph started.",
+                "session_id": session_id,
+                "cost_estimate": theory_est.to_dict(),
+            }
+        )
+
     # ── Brainstorm (QNN): same library engine as `deepthink qnn` / /qnn skill ──
     if mode == "brainstorm":
         session_id = str(uuid.uuid4())
@@ -689,7 +833,9 @@ async def build_and_run_graph(payload: dict = Body(...)):
 
     return JSONResponse(
         content={
-            "message": (f"Unsupported mode '{mode}'. Use 'brainstorm' or 'app_slot_machine'.")
+            "message": (
+                f"Unsupported mode '{mode}'. Use 'theory', 'brainstorm' or 'app_slot_machine'."
+            )
         },
         status_code=400,
     )

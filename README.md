@@ -4,7 +4,9 @@
 
 # open-deepthink: Evolvable Agent Networks for Deep, Structured Reasoning
 
-> **🛡 New: RSI for cybersecurity.** A recursive self-improvement loop that covers an institution's security policies with a lattice of agents, finds where the rules clash, and evolves them with controls that must raise a measured posture. It is built on the *Agent Mechanics* treatise, and a local model learns from every pass through a LoRA loop. [Jump to RSI ↓](#-rsi-recursive-self-improvement-for-cybersecurity)
+> **∑ New: Theory Synthesis.** Brainstorming mode is now Theory Synthesis, a harness for parallel problem solving. A swarm of QNNs works on one math problem, algorithm design task, physics question or IMO-style instance. Each QNN splits the problem into cells until every cell is easy for one of its solvers, and a hierarchy of synthesizers collapses the cells back into a proposal. Every cell writes into one shared, consistency-checked body of work, and the swarm converges through a vote weighted by mirror descent. [Jump to Theory Synthesis ↓](#-theory-synthesis-a-swarm-of-qnns-for-one-hard-problem)
+
+> **🛡 RSI for cybersecurity.** A recursive self-improvement loop that covers an institution's security policies with a lattice of agents, finds where the rules clash, and evolves them with controls that must raise a measured posture. It is built on the *Agent Mechanics* treatise, and a local model learns from every pass through a LoRA loop. [Jump to RSI ↓](#-rsi-recursive-self-improvement-for-cybersecurity)
 
 **Not another flat panel of 16 agents brainstorming once.**  
 A **Qualitative Neural Network (QNN)** that runs layered forward passes, reflects on its own performance, mutates its agents' cognitive identities, raises the difficulty of the problem, and records the entire developmental history as high-signal training data.
@@ -13,16 +15,194 @@ Most agentic systems give you breadth through parallelism. open-deepthink gives 
 
 ### What this is (and is not)
 
-This is a **structured multi-agent loop**: layered LLM calls, lexical retrieval of past cells, prompt rewrite between epochs, and JSON traces. Neural-net words (Mirror Descent, self-attention, diffusion) are a **design language**. They are not those algorithms. Output quality versus a single long prompt is **unevaluated**. See [`docs/DESIGN_NOTES.md`](./docs/DESIGN_NOTES.md) and [`docs/EVAL.md`](./docs/EVAL.md).
+This is a **structured multi-agent loop**: layered LLM calls, lexical retrieval of past cells, prompt rewrite between epochs, and JSON traces. Neural-net words (Mirror Descent, self-attention, diffusion) are a **design language**. They are not those algorithms. There is one exception: Theory Synthesis updates its swarm's vote weights with real entropic mirror descent (exponentiated gradient on the simplex). Output quality versus a single long prompt is **unevaluated**. See [`docs/DESIGN_NOTES.md`](./docs/DESIGN_NOTES.md) and [`docs/EVAL.md`](./docs/EVAL.md).
 
-The fourth mode, **RSI**, is the newest. It applies recursive self-improvement to cybersecurity: an institution's policies are read as a law, covered with Agent Mechanics agents, healed where they clash, and evolved with posture-gated controls. It is described first, below.
+Two modes are new and are described first, below. **Theory Synthesis** replaces Brainstorming mode in the web UI: a swarm of QNNs solves one hard problem and builds a shared body of work. **RSI** applies recursive self-improvement to cybersecurity: an institution's policies are read as a law, covered with Agent Mechanics agents, healed where they clash, and evolved with posture-gated controls.
 
 **Start small.** Auto mode caps at 24 agents. Prefer `2×2×1` or `3×3×2`. Estimate before you spend:
 
 ```bash
+deepthink estimate theory --swarm 5 --rounds 2   # upper bound on LLM calls
 deepthink estimate qnn --layers 2 --width 2 --epochs 1
 deepthink eval          # mock LLMs, no API key — structural checks only
 ```
+
+---
+
+## ∑ Theory Synthesis: a swarm of QNNs for one hard problem
+
+**Theory Synthesis runs many QNNs in parallel on one problem and makes their work add up.** It is built for math problems, algorithm design, physics, and single instances of IMO-style problems. In the web UI it replaces Brainstorming mode.
+
+Each QNN in the swarm splits the problem into a tree of cells until every cell is easy for one of its solvers. It solves those cells, then synthesizes the results back up into one proposal. Every cell's result goes into one shared, consistency-checked **body of work** that every agent reads. The swarm votes on the final answer with weights updated by mirror descent. It repeats with the dissenting QNNs until enough of the swarm agrees.
+
+> Agreement is not proof. The vote measures how much of the swarm backs an answer. The verifier and the arbiter are model calls and can be wrong. Because the QNNs share a body of work, they build on each other's results, so their votes are not independent samples. Check the argument. Quality on real olympiad problems is unevaluated.
+
+### What a run gives you
+
+| Output | What it is |
+|---|---|
+| **Answer** | The leading answer and the winning QNN's complete solution. It says how many QNNs back the answer (support) and whether that reached the quorum. |
+| **Vote** | Every answer cluster in every round: QNNs, support, mass, mean check score, and the entropy of the weights. |
+| **Decomposition** | The winning QNN's cell tree. For each cell: who solved or synthesized it, its easiness, its claim, and its body-of-work entry. |
+| **Body of work** | Every result the swarm wrote. Each has a status (verified, corroborated, proposed, disputed, suspect or refuted), authors and dependencies. Conflicts, their verdicts and reuse are also listed. |
+| **Trace** | Every QNN's seeds, personas, framings, proposals, losses and weights per round, and the body-of-work entries each cell was shown, as JSON. |
+
+### The mechanism, step by step
+
+**1. One QNN, modified.** Each member of the swarm keeps the QNN heuristic. Seed verbs and nouns (proof moves, mathematical objects, and words from far fields) are sampled into per-column word-vectors. Each column spans one persona per layer. **Layer 0 agents are solvers** with concrete techniques. **Layers 1 and up are synthesizers.** A QNN is L layers × W columns. *Auto* sizes it per problem, with at most 24 agents per QNN.
+
+**2. Descent: split the problem until each cell is easy.** The root cell is the problem. A decomposer picks the solver of that QNN whose skills fit the cell best. It rates the cell's **easiness**: the probability that this solver, working alone in one pass, gets the cell completely right.
+
+- If easiness ≥ τ (0.75 by default), the cell is a leaf.
+- Otherwise it is split into 2 to *b* subcells whose results combine into the cell's result. A subcell is a lemma, a case, a computation, a construction, a bound, a reduction or a check. A subcell may depend on earlier siblings.
+- Each subcell comes with its own easiness rating, so an easy subcell costs no further call.
+- The descent stops at depth *D* or when the QNN's cell budget is spent.
+
+**3. Ascent: solve the leaves, then synthesize upward.** All leaves are solved in parallel by layer-0 solvers. A cell waits only for the cells it depends on. Each internal cell is collapsed by a synthesizer from the layer that matches its height in the tree, so layer *k* sees layer *k−1*'s outputs, as in the QNN forward pass. A synthesizer checks that the pieces really combine, fills missing steps and fixes wrong subresults. The root synthesis is the QNN's **proposal**, ending with a boxed final answer.
+
+**4. The body of work.** Without it, an agent sees only its own thought stream: its persona, the cells below it and its own past outputs. With it, every solved or synthesized cell is written to one shared ledger, with its author (QNN, round, cell) and the entries it was built on. Every agent reads the entries most relevant to its cell and cites them by id. This is the QNN's self-attention, reading the shared ledger instead of private memory. The ledger keeps the body of work consistent:
+
+- The same result derived by two QNNs merges into one entry, which becomes **corroborated**.
+- A conflict opens when two entries answer the same question differently, when an agent declares its cell the `same_as` an entry with a different answer, or when an agent lists an entry under `contradicts`. Both sides become **disputed**.
+- After each round an **arbiter** rechecks up to *N* conflicts and decides which side holds. The losing entry is **refuted**, and the winner is **verified**.
+- An entry whose every derivation rests on a refuted or suspect entry becomes **suspect**. So does any proposal built on it, and a suspect proposal loses half its vote.
+- The verifier of a proposal can confirm the entries the proposal rests on (**verified**) or refute them.
+- A decomposer can mark a subcell as already established, and the QNN then **reuses** a verified, corroborated or proposed entry instead of solving it again. Reuse is accepted only when the entry is about the same thing as the subcell.
+
+Proposals are written to the ledger but never shown to other agents: QNNs share lemmas, not verdicts. In **private** mode each QNN reads only its own entries. That keeps the votes independent, as in classic self-consistency, and conflicts are still detected across the swarm.
+
+**5. Verification.** An independent verifier rechecks each proposal against the domain's checklist. It scores the probability that both the answer and the argument are correct. A proposal that scores below a floor (0.2 by default) abstains.
+
+**6. The vote.** Final answers are put in a canonical form before they are compared:
+
+- `\boxed{\frac{1}{2}}`, `0.5` and `1/2` are one answer;
+- `{3, 1, 2}`, `\{1,2,3\}` and `n = 1, 2, 3` are one set;
+- `Yes` and `true` are one verdict;
+- numbers with units match within a tolerance (relative 1e-3 for physics).
+
+Each QNN carries a weight *wᵢ* (the weights sum to 1) and a quality *qᵢ*. The quality is the verifier score, halved if the proposal is suspect and zero if it is refuted.
+
+- The **mass** of an answer is Σ *wᵢ·qᵢ* over the QNNs that back it. The heaviest answer leads.
+- The **support** of an answer is Σ *wᵢ* over the same QNNs. QNNs that abstain keep their weight in the total, so two agreeing QNNs out of ten are 20 % support.
+- The swarm **converges** when the leader's support reaches the quorum (0.5 by default).
+
+With `vote = plurality`, weights and quality are ignored: if 100 QNNs answer and answer 1 is the most common, answer 1 wins.
+
+**7. Mirror descent.** After a round that did not converge, each QNN gets a loss:
+
+```text
+ℓᵢ = ½ · (1 − support of its answer) + ½ · (1 − qᵢ)
+wᵢ ← wᵢ · exp(−η ℓᵢ) / Σⱼ wⱼ · exp(−η ℓⱼ)
+```
+
+This is entropic mirror descent on the simplex (exponentiated gradient), so here "Mirror Descent" is the algorithm itself, not a metaphor. Weight flows to QNNs that agree with the swarm and pass their checks, and the leader's support rises until it reaches the quorum or the rounds run out.
+
+**8. Dissent: evolve, respawn, reframe.** QNNs that back another answer, abstain, or rest on refuted results try again. QNNs in the leading cluster keep their proposals.
+
+- Each dissenting QNN's personas are rewritten (the QNN's qualitative Mirror Descent), more strongly the larger its loss: the rewrite rate is η·ℓᵢ.
+- A QNN whose weight falls below a floor (0.35 of an even share) respawns from fresh seeds.
+- A reframer gives each one a new representation of the same problem, such as an invariant, a change of variables or an energy method. The reframer is not shown any answer.
+
+Then they descend and ascend again, reading everything the swarm has established so far.
+
+```text
+                         problem
+                            │
+        ┌───────────────────┼───────────────────┐     S QNNs in parallel
+      QNN 0               QNN 1      …        QNN S−1
+        │  descent: split cells until easiness ≥ τ (depth ≤ D, ≤ C cells)
+        │  ascent: layer 0 solves leaves, layers 1…L−1 synthesize upward
+        │  proposal → verifier
+        └──────────────── body of work ─────────────────┘   merge · conflicts · arbitration
+                            │                               taint · reuse
+              vote: canonical answers, mass, support
+                            │
+              quorum reached → answer
+              otherwise → mirror descent on the weights;
+                          dissenters evolve, respawn or get a new framing ↺
+```
+
+### Domains
+
+| Domain | Solvers are told to | The verifier checks |
+|---|---|---|
+| `math` | state their notation, justify every step, prefer exact values | each step follows, edge cases, small cases, and that the answer answers the question asked |
+| `olympiad` | treat the problem as one IMO-style instance, test small cases first, prove both directions of "find all", find the equality case | small cases, completeness of "find all" answers, equality cases, explicit constructions, no unproven "well-known" claims |
+| `algorithms` | give the algorithm, a correctness argument and its complexity, and claim optimality only with a lower bound | correctness in every case, the complexity bound, edge cases, a lower bound for any optimality claim |
+| `physics` | state the model, use conservation laws and symmetry, carry units, check dimensions and limiting cases | dimensions, limiting cases, conservation, order of magnitude, signs |
+
+With `auto`, a sizer classifies the domain and the answer type, with a keyword guess as the fallback. On a "prove that" problem every QNN's answer is "proof" unless one finds a counterexample, so the vote turns on the verifier's scores.
+
+### Controls
+
+| Control (UI / param) | Default | Meaning |
+|---|---|---|
+| QNNs in the swarm / `swarm_size` | 5 | how many QNNs run in parallel (1–128) |
+| Rounds / `rounds` | 2 | swarm rounds, the QNN's epochs |
+| Quorum / `quorum` | 0.5 | the leader's support needed to stop |
+| Topology / `qnn_mode`, `manual_layers`, `manual_width` | auto | each QNN's layers × width; layer 0 solves, the rest synthesize |
+| Max depth / `max_depth` | 2 | how many times a cell may be split |
+| Branching / `branching` | 3 | subcells per split, at most |
+| Easiness τ / `easiness` | 0.75 | a cell is a leaf once its solver rates it this easy |
+| Cells per QNN / `max_cells` | 10 | size cap of each QNN's tree |
+| Vote / `vote` | weighted | `weighted` (mirror-descent weights × checks) or `plurality` |
+| Learning rate η / `learning_rate` | 1.0 | the mirror-descent step and the strength of persona rewrites |
+| Body of work / `ledger` | shared | `shared` across QNNs or `private` to each |
+| Verify proposals / `verify`, `min_verify` | on, 0.2 | proposal checks; below the floor a proposal abstains |
+| `max_arbitrations` | 4 | conflicts settled per round |
+| Parallel calls / `concurrency` | 8 | simultaneous LLM calls across the whole swarm |
+| Max LLM calls / `max_calls` | 0 | a hard budget (0 = none); the run stops cleanly when it is spent |
+| Temperature min–max / `temperature_min`, `temperature_max` | provider default | an optional temperature spread across QNNs |
+| Per-Agent Models (settings) / `--member-models` | — | a mixed-model swarm: QNNs take the models in turn |
+| Polish the report / `polish` | off | one extra call to rewrite the report; the mathematics is kept |
+| `seed` | random | makes the sampling of seed words reproducible |
+
+### Run it
+
+**Web UI:** the **∑ Theory Synthesis** tab. Set the swarm and the descent, state one problem in the chat, and watch the swarm panel:
+
+- every QNN is a square, colored by the answer it backs and pulsing while it works;
+- the vote is a set of bars, one per answer, against a quorum marker;
+- the body of work is a running count: results, verified, corroborated, refuted, conflicts settled, reuses.
+
+The report arrives in the chat: the answer, the solution, how the swarm agreed, the winning QNN's decomposition, the body of work and the checks. *Simulation Mode* runs the whole engine on a mock model, with no API key.
+
+**CLI:**
+
+```bash
+deepthink theory --debug -p "Let a_1 = 2 and a_{n+1} = a_n + 1. Find a_2025."    # Simulation Mode
+deepthink theory --domain olympiad --swarm 5 --rounds 2 --input problem.txt --yes
+deepthink theory -p "…" --member-models <model-a>,<model-b> --swarm 6 --max-calls 300 --yes   # mixed-model swarm
+deepthink theory -p "…" --private-ledger --vote plurality --swarm 20 --depth 1 --yes          # independent votes
+deepthink estimate theory --swarm 5 --rounds 2 --depth 2
+```
+
+**Library:**
+
+```python
+import asyncio
+from deepthink import create_llm, run_theory
+
+async def main():
+    llm = create_llm()  # OpenRouter from env, or create_llm(provider="llamacpp")
+    r = await run_theory(
+        llm,
+        "Find all positive integers n such that 3 divides 2^n + 1.",
+        params={"domain": "olympiad", "swarm_size": 5, "rounds": 2, "concurrency": 8},
+    )
+    print(r["final_answer"], r["converged"], r["support"])
+    print(r["body_of_work"]["stats"])   # verified, corroborated, refuted, conflicts, reuses
+
+asyncio.run(main())
+```
+
+**Cost.** `deepthink estimate theory` prints an upper bound. Each cell costs at most one decomposer call and one solve or synthesis call. Each proposal adds one verification, each round up to `max_arbitrations` arbitrations, and each later round one reframe and one evolve or respawn call per dissenting QNN. The defaults (5 QNNs, 2 rounds, depth 2, branching 3, 10 cells) come to at most 171 calls. Easy problems, early convergence and reused results cost much less: a simulated 8-QNN run that converged in 2 rounds made 65 calls. The CLI refuses runs estimated above 80 calls unless you pass `--yes` or cap the run with `--max-calls 80`.
+
+### What is measured and what is not
+
+- **Measured (in the test suite):** that canonical forms match equal answers and keep different ones apart; the vote; the mirror-descent step (closed form, rising leader support); the ledger's rules for merging, conflicts, arbitration and taint; the limits on depth, branching and cells; dependency order; the concurrency cap and the call budget; and that the cost estimate bounds worst-case runs.
+- **Readings, not measurements:** easiness ratings, verifier scores and arbiter verdicts are model judgments.
+- **Not claimed:** that the swarm solves IMO problems, that agreement means correctness, or that a larger swarm is better. Quality on real problems is unevaluated.
 
 ---
 
@@ -254,7 +434,7 @@ A QNN is a directed, layered graph of LLM agents with three repeating phases per
 
 1. **Forward Pass** — Problem is decomposed across the topology. Layer 0 runs in parallel. Each subsequent layer receives context from the previous layer and builds deeper analysis. Information flows structurally, not just through a shared chat.
 
-2. **Qualitative Self-Attention (brainstorm)** — Within each epoch, neurons do **not** only see graph neighbors. Each agent scores a capped pool of past / non-local neurons by **lexical overlap** (persona tokens vs past text) and injects the top-k excerpts. No MatMul, no extra LLM call. Inspired by [colony](https://github.com/iblameandrew/colony). Implementation: `deepthink/self_attention.py`.
+2. **Qualitative Self-Attention** — Within each epoch, neurons do **not** only see graph neighbors. Each agent scores a capped pool of past / non-local neurons by **lexical overlap** (persona tokens vs past text) and injects the top-k excerpts. No MatMul, no extra LLM call. Inspired by [colony](https://github.com/iblameandrew/colony). Implementation: `deepthink/self_attention.py`. In Theory Synthesis the same idea reads the swarm's shared body of work instead of private memory.
 
 3. **Reflection + Mirror Descent** — After synthesis, the system does not just "critique the answer." It:
    - Evaluates which agents struggled vs. succeeded on their specific sub-problems.
@@ -268,7 +448,7 @@ This loop (decompose → structured forward **+ attend** → synthesize → refr
 
 ---
 
-## Four Powerful Operating Modes
+## Four Powerful Operating Modes (plus the classic QNN)
 
 ### 1. ⚗️ Knowledge Distillation Mode (The Data Engine)
 
@@ -286,9 +466,13 @@ The most distinctive and high-leverage mode.
 
 This is not generic chat logs. It is **structured developmental trace data** (QA pairs + topology archive). The intent is that traces like these could help train later models. That use is **unevaluated**.
 
-### 2. 🧠 Brainstorming Mode (Full QNN Expert Panel)
+### 2. ∑ Theory Synthesis (formerly Brainstorming Mode)
 
-A chat-first interface that runs the **same QNN deepthink algorithm** as the portable `/qnn` skill — not a flat static expert panel.
+The web UI's second tab. A swarm of QNNs solves one problem in parallel: each QNN splits it into cells that are easy for its solvers and synthesizes the cells back into a proposal. Every cell writes into one shared body of work, and the swarm converges through a vote weighted by mirror descent. It is built for math problems, algorithm design, physics, and single instances of IMO-style problems. The mechanism, controls, CLI and library are in the [Theory Synthesis section](#-theory-synthesis-a-swarm-of-qnns-for-one-hard-problem) at the top.
+
+#### The classic QNN (Solution-Space Report)
+
+The tab used to run the classic QNN, which maps divergent strategies for an impasse instead of solving a problem. That pipeline is unchanged. It is still the engine of `run_qnn`, `deepthink qnn` and the portable `/qnn` skill, and API clients can still post `mode: "brainstorm"` to `/build_and_run_graph`.
 
 **Step-by-step each run:**
 
@@ -300,7 +484,7 @@ A chat-first interface that runs the **same QNN deepthink algorithm** as the por
 4. **Epoch loop** — Layered forward pass **with qualitative self-attention** → epoch map → Mirror Descent → harder reframe  
 5. **Solution-Space Report** — Divergent strategies with falsifiers and first probes (handoff to edit→run→debug)
 
-#### Self-attention inside the epoch (from colony QSA)
+#### Self-attention inside the epoch (classic QNN, from colony QSA)
 
 Feed-forward edges only connect a neuron to the **previous layer**. Self-attention adds a second path: each agent scores a capped pool of **non-neighbor past neurons** (skipped earlier layers this epoch + other agents’ multi-epoch memory) and injects the top‑k as a sparse attended-value block.
 
@@ -331,7 +515,7 @@ Replaces Algorithm Design Mode with **Qualitative Diffusion App Designer (QDAD)*
 |-------|------|
 | Package | `deepthink/qdad/` (`state`, `nodes`, `graph`, `pipeline`, `utils`) |
 | Chains | `deepthink/chains/qdad_chains.py` |
-| GUI | Same chat shell as Brainstorming + N / Temperature Scale / Denoising Steps / Noun-Verb T |
+| GUI | Same chat shell as Theory Synthesis + N / Temperature Scale / Denoising Steps / Noun-Verb T |
 | Graph | LangGraph: `foundation → grid → noise → denoise⟲ → synthesize` |
 
 - **Phase 0** — N nouns + N verbs (shared qualitative basis, noun/verb temperature)
@@ -356,6 +540,7 @@ A single deep open-deepthink run produces far more than an answer:
 - **Full evolutionary traces** — Every prompt before/after Mirror Descent, every difficulty classification, every child/parent relationship, every reframed problem.
 - **Structured distillation datasets** — Purpose-built for fine-tuning or synthetic data pipelines targeting advanced reasoning and multi-agent behavior.
 - **Interpretable intermediate state** — Because everything is explicit natural-language personas and traceable sub-problems, you can diagnose *why* the system thought what it thought at any layer and epoch.
+- **A body of work** (Theory Synthesis) — Every lemma, case and computation the swarm wrote, with authors, dependencies, conflicts, arbitration verdicts and reuse.
 - **Accumulated executable knowledge** (in code modes) — Real modules that survived sandbox validation and were re-used.
 
 These artifacts are the real product. The final synthesized answer is a byproduct.
@@ -378,6 +563,7 @@ These artifacts are the real product. The final synthesized answer is a byproduc
 - Clean provider model: only OpenRouter (cloud) and LlamaCpp / llama.cpp server (local).
 - Robust JSON handling, token tracking, streaming logs, RAPTOR indexing, AST+subprocess sandbox, disk-backed sessions, and a pre-run **cost estimator**.
 - Real export/import of QNN state. One `GraphState` (library = web).
+- **Theory Synthesis** runs a swarm of QNNs under one concurrency cap and call budget. Its body of work merges, checks and arbitrates every result. The vote, the mirror-descent step, the ledger rules and the cost bound are checked in the test suite.
 - **RSI** keeps a control only if the measured posture of the policy rises; the tick law's conservation and the gauge invariance of clash detection are checked in the test suite.
 - Manual mode can grow large if you pass `--yes`; auto mode caps at 24 agents. Estimate first.
 
@@ -387,7 +573,7 @@ These artifacts are the real product. The final synthesized answer is a byproduc
 
 ### A. Python package (algorithms library)
 
-All four modes ship as an importable package — **no web server required**.
+Every mode ships as an importable package — **no web server required**.
 
 ```bash
 git clone https://github.com/iblameandrew/open-deepthink
@@ -395,16 +581,24 @@ cd open-deepthink
 python -m venv venv
 .\venv\Scripts\activate          # Windows
 # source venv/bin/activate       # macOS/Linux
-pip install -e .                 # library: QNN + QDAD + RSI + distillation
+pip install -e .                 # library: Theory Synthesis + QNN + QDAD + RSI + distillation
 cp .env.example .env             # set OPENROUTER_API_KEY (or use llamacpp)
 ```
 
 ```python
 import asyncio
-from deepthink import create_llm, run_qnn, run_qdad, run_rsi, DistillationGraph
+from deepthink import create_llm, run_qnn, run_qdad, run_rsi, run_theory, DistillationGraph
 
 async def main():
     llm = create_llm()  # OpenRouter from env, or create_llm(provider="llamacpp")
+
+    # 0) Theory Synthesis → a swarm of QNNs solves one problem and builds a body of work
+    theory = await run_theory(
+        llm,
+        "Find all positive integers n such that 3 divides 2^n + 1.",
+        params={"domain": "olympiad", "swarm_size": 5, "rounds": 2},
+    )
+    print(theory["final_answer"], theory["converged"], theory["body_of_work"]["stats"])
 
     # 1) Qualitative Neural Network → Solution-Space Report
     qnn = await run_qnn(
@@ -445,10 +639,13 @@ asyncio.run(main())
 **CLI (same library, no browser:**
 
 ```bash
+deepthink theory --prompt "Find all n such that 3 divides 2^n + 1." --domain olympiad --yes
+deepthink theory --prompt "…" --debug        # Simulation Mode: mock LLM, no API key
 deepthink qnn  --prompt "Break this deadlock…" --verbose
 deepthink qdad --prompt "cozy night writing app" --n 3 --steps 2
 deepthink rsi  --input examples/security/institution_access_policy.txt --drive leak --offline
 deepthink qnn  --prompt "…" --debug          # mock LLM, no API key
+deepthink estimate theory --swarm 5 --rounds 2
 deepthink estimate qnn --layers 2 --width 2 --epochs 1
 deepthink estimate rsi --iterations 2
 deepthink eval                               # structural checks, mock LLMs
@@ -457,21 +654,23 @@ deepthink version
 
 | Algorithm | Import | What you get |
 |-----------|--------|----------------|
+| **Theory Synthesis** | `from deepthink import run_theory` | A swarm of QNNs: descent into easy cells, parallel solving, synthesis, a shared body of work, a mirror-descent vote → answer + solution |
 | **QNN** | `from deepthink import run_qnn` | Layered multi-agent epochs + Mirror Descent + self-attention → Solution-Space Report |
 | **QDAD** | `from deepthink import run_qdad` | Noun×verb diffusion grid → buildable App Build Prompt |
 | **RSI** | `from deepthink import run_rsi` | Recursive self-improvement for cybersecurity → findings, posture-gated controls, hardened policy, LoRA traces |
 | **Distillation** | `from deepthink import DistillationGraph` | 1×2×2×2×2×2×1 evolutionary topology → dataset + `topology_archive.json` |
 | **Self-attention** | `from deepthink import compute_self_attention` | Qualitative attention over non-local past neurons |
 | **Providers** | `from deepthink import create_llm` | OpenRouter or llama.cpp chat models |
-| **Cost / eval** | `estimate_qnn_cost`, `estimate_rsi_cost`, `run_structural_eval` | Call-count estimate; mock structural eval (not a quality bench) |
+| **Cost / eval** | `estimate_theory_cost`, `estimate_qnn_cost`, `estimate_rsi_cost`, `run_structural_eval` | Call-count estimate; mock structural eval (not a quality bench) |
 
 Package layout:
 
 ```
 deepthink/
-  api.py              # high-level run_qnn / run_qdad / run_rsi / run_distillation
+  api.py              # high-level run_theory / run_qnn / run_qdad / run_rsi / run_distillation
   providers.py        # create_llm(...)
-  qnn/                # brainstorm QNN pipeline
+  theory/             # Theory Synthesis (pipeline, ledger = body of work, consensus, answers, domains)
+  qnn/                # classic QNN pipeline (Solution-Space Report)
   qdad/               # qualitative diffusion
   nomosloop/          # RSI engine (mechanics/correspondence/world/security/lora/graph/…)
   distillation/       # evolutionary knowledge distillation
@@ -549,6 +748,7 @@ MIT — see [LICENSE](./LICENSE).
 - **Epochs**: The number of full forward + reflection + reframing cycles. This is where the power law lives.
 - **Learning rate / Density / Prompt alignment**: Control how aggressively agents mutate and how strongly the original problem shapes their identities.
 - **Token budget** (Distillation): The real governor. Set it high if you want serious evolutionary runs.
+- **Swarm size, rounds, depth** (Theory Synthesis): Cost grows with QNNs × rounds × cells per QNN. Start with 3–5 QNNs, depth 2 and 2 rounds, cap the run with *Max LLM calls*, and raise *Parallel calls* only as far as your provider's rate limit allows. On a local model, keep *Parallel calls* near the number of slots your llama.cpp server runs.
 
 **Practical guidance**:
 - 32 GB RAM CPU laptop: 2×2 to 4×4 topologies, 2–4 epochs.

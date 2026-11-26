@@ -70,7 +70,7 @@ def t3():
     with open(str(ROOT.joinpath("README.md")), encoding="utf-8") as f:
         text = f.read()
     required = [
-        "Brainstorming",
+        "Theory Synthesis",
         "App Slot Machine",
         "Distillation",
         "Mirror Descent",
@@ -476,7 +476,7 @@ def t23():
     with open(str(ROOT.joinpath("index.html")), encoding="utf-8") as f:
         html = f.read()
     assert "memory-calculator.js" in html
-    assert "brainstorm-mem-calc" in html
+    assert "theory-mem-calc" in html
     assert "qdad-mem-calc" in html
     assert "qdad_grid_size" in html
     assert (

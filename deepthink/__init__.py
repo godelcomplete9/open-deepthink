@@ -1,14 +1,17 @@
 """
-open-deepthink — Qualitative Neural Networks, Qualitative Diffusion, and
-evolutionary knowledge distillation as a **Python library**.
+open-deepthink — Theory Synthesis (a swarm of QNNs), Qualitative Neural
+Networks, Qualitative Diffusion, RSI, and evolutionary knowledge distillation
+as a **Python library**.
 
 Quick start (library)::
 
     import asyncio
-    from deepthink import create_llm, run_qnn, run_qdad, DistillationGraph
+    from deepthink import create_llm, run_theory, run_qnn, run_qdad, DistillationGraph
 
     async def main():
         llm = create_llm()  # needs OPENROUTER_API_KEY or provider='llamacpp'
+        solved = await run_theory(llm, "Find all positive integers n such that …")
+        print(solved["final_answer"], solved["converged"])
         report = await run_qnn(llm, "Break this ownership deadlock…")
         print(report["proposed_solution"])
 
@@ -37,6 +40,13 @@ __all__ = [
     "__release_name__",
     "__release_tag__",
     # Algorithms (lazy)
+    "run_theory",
+    "run_theory_pipeline",
+    "default_theory_params",
+    "TheoryResult",
+    "TheoryLedger",
+    "canonical_answer",
+    "estimate_theory_cost",
     "run_qnn",
     "run_qdad",
     "run_rsi",
@@ -80,6 +90,13 @@ __all__ = [
 
 # Map public names → (module, attribute) for lazy loading
 _LAZY: dict[str, tuple[str, str]] = {
+    "run_theory": ("deepthink.api", "run_theory"),
+    "run_theory_pipeline": ("deepthink.theory", "run_theory_pipeline"),
+    "default_theory_params": ("deepthink.theory", "default_theory_params"),
+    "TheoryResult": ("deepthink.theory", "TheoryResult"),
+    "TheoryLedger": ("deepthink.theory", "TheoryLedger"),
+    "canonical_answer": ("deepthink.theory", "canonical_answer"),
+    "estimate_theory_cost": ("deepthink.cost", "estimate_theory_cost"),
     "run_qnn": ("deepthink.api", "run_qnn"),
     "run_qdad": ("deepthink.api", "run_qdad"),
     "run_rsi": ("deepthink.api", "run_rsi"),
