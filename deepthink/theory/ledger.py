@@ -125,6 +125,8 @@ class Entry:
 
 @dataclass
 class Conflict:
+    """Two entries that cannot both hold, or (``b == ""``) one entry and a challenge to it."""
+
     id: str
     a: str
     b: str
@@ -133,6 +135,7 @@ class Conflict:
     status: str = "open"  # open | resolved | dismissed
     verdict: str = ""  # a | b | neither | both
     note: str = ""
+    challenge: str = ""  # the objection, when b is a challenge rather than an entry
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -266,20 +269,31 @@ class TheoryLedger:
         self._norm[entry.id] = norm
 
         if not proposal:
+            # A refuted entry is already settled: disagreeing with it is no conflict.
             for other, _sim in self._similar(toks, norm, exclude=entry.id):
-                if not self._agree(other.canon, canon):
+                if other.status != "refuted" and not self._agree(other.canon, canon):
                     conflicts.append(
                         self._open(entry, other, "same statement, different answers", round_)
                     )
             declared = self.get(same_as)
-            if declared is not None and not declared.proposal and declared.id != entry.id:
+            if (
+                declared is not None
+                and not declared.proposal
+                and declared.id != entry.id
+                and declared.status != "refuted"
+            ):
                 if not self._agree(declared.canon, canon):
                     conflicts.append(
                         self._open(entry, declared, f"QNN {member} declared it the same", round_)
                     )
             for cid in dict.fromkeys(contradicts or []):
                 other_e = self.get(cid)
-                if other_e is not None and not other_e.proposal and other_e.id != entry.id:
+                if (
+                    other_e is not None
+                    and not other_e.proposal
+                    and other_e.id != entry.id
+                    and other_e.status != "refuted"
+                ):
                     conflicts.append(
                         self._open(entry, other_e, f"QNN {member} reports a contradiction", round_)
                     )
@@ -341,6 +355,38 @@ class TheoryLedger:
                 self._set_status(e, "disputed", f"conflict {c.id}: {reason}")
         return c
 
+    def challenge(
+        self, eid: str, objection: str, round_: int = 1
+    ) -> tuple[list[str], Conflict | None]:
+        """Object to an entry without a rival entry (for example, a verifier says it is wrong).
+
+        A merely proposed entry is refuted at once. A corroborated, verified or disputed
+        entry is too established for one objection: it opens a conflict the arbiter
+        settles. Returns the tainted ids and the conflict opened, if any.
+        """
+        e = self.get(eid)
+        if e is None or e.proposal or e.status in TAINTED:
+            return [], None
+        if e.status == "proposed":
+            return self.refute(eid, objection), None
+        for c in self.conflicts.values():
+            if c.status == "open" and c.a == eid and not c.b:
+                return [], c
+        self._cseq += 1
+        c = Conflict(
+            id=f"C{self._cseq}",
+            a=eid,
+            b="",
+            reason="challenged by a verifier",
+            round=int(round_),
+            challenge=_excerpt(objection, 600),
+        )
+        self.conflicts[c.id] = c
+        if e.status != "disputed":
+            e.held_status = e.status
+            self._set_status(e, "disputed", f"conflict {c.id}: {_excerpt(objection, 200)}")
+        return [], c
+
     def open_conflicts(self) -> list[Conflict]:
         return [c for c in self.conflicts.values() if c.status == "open"]
 
@@ -358,17 +404,25 @@ class TheoryLedger:
         verdict = (verdict or "").strip().lower()
         if verdict not in {"a", "b", "neither", "both"}:
             verdict = "both"
-        a, b = self.entries[c.a], self.entries[c.b]
+        a = self.entries[c.a]
+        b = self.entries.get(c.b) if c.b else None  # None: a challenge, not a rival entry
         c.verdict = verdict
         c.note = _excerpt(note, 400)
         c.status = "dismissed" if verdict == "both" else "resolved"
         changed: list[str] = []
         if verdict == "both":
-            self._restore(a)
-            self._restore(b)
+            for e in (a, b):
+                if e is not None:
+                    self._restore(e)
             return changed
-        losers = {"a": [b], "b": [a], "neither": [a, b]}[verdict]
-        winners = {"a": [a], "b": [b], "neither": []}[verdict]
+        sides: dict[str, tuple[list[Entry | None], list[Entry | None]]] = {
+            "a": ([b], [a]),
+            "b": ([a], [b]),
+            "neither": ([a, b], []),
+        }
+        lose, win = sides[verdict]
+        losers = [e for e in lose if e is not None]
+        winners = [e for e in win if e is not None]
         for e in losers:
             changed += self.refute(e.id, f"lost arbitration {c.id}: {c.note or c.reason}")
         for e in winners:
@@ -393,10 +447,11 @@ class TheoryLedger:
         changed = [e.id] + self._propagate()
         for c in self.conflicts.values():
             if c.status == "open" and e.id in (c.a, c.b):
-                other = self.entries[c.b if c.a == e.id else c.a]
                 c.status, c.verdict = "resolved", ("b" if c.a == e.id else "a")
                 c.note = f"{e.id} refuted elsewhere"
-                self._restore(other)
+                other = self.entries.get(c.b if c.a == e.id else c.a)
+                if other is not None:
+                    self._restore(other)
         return changed
 
     def _propagate(self) -> list[str]:

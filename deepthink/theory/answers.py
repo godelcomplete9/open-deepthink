@@ -312,13 +312,27 @@ _QTY = re.compile(
 )
 
 
+_UNIT_SYMBOLS = frozenset(
+    """m s g kg mg cm mm km nm um A mA K mol cd N kN J kJ MJ eV keV MeV GeV W kW MW V mV kV
+    C uC nC Pa kPa MPa atm bar Hz kHz MHz GHz T Wb H F uF nF pF ohm Ω L mL rad sr deg ° °C °F
+    h min ms ns us ps ly AU pc yr""".split()
+)
+
+
 def _quantity(s: str) -> tuple[float, str] | None:
-    """``9.81 m/s^2`` → (9.81, 'm/s^2'); ``3e8 m/s`` → (3e8, 'm/s'); no unit → None."""
+    """``9.81 m/s^2`` → (9.81, 'm/s^2'); ``3e8 m/s`` → (3e8, 'm/s'); no unit → None.
+
+    Only physical units count: ``2n`` or ``3 pi`` is an expression, not a quantity, so
+    it is normalized like ``2 \\cdot n`` and ``3\\pi``.
+    """
     m = _QTY.match(s)
     if not m or not m.group(3):
         return None
     unit = m.group(3).strip()
     if not unit or unit.lower() in {"or", "and"}:
+        return None
+    symbols = re.findall(r"[A-Za-z°Ω]+", unit)
+    if not symbols or any(sym not in _UNIT_SYMBOLS for sym in symbols):
         return None
     try:
         val = float(m.group(1))
@@ -350,6 +364,7 @@ def _split_top(s: str, sep: str = ",") -> list[str]:
 
 
 _ASSIGN = re.compile(r"^(?:[a-z](?:_\w+)?|[a-z]\(\w+\)|\w{1,3})\s*=\s*(?![=<>])")
+_MEMBER = re.compile(r"^(?:[a-z](?:_\w+)?|\w{1,3})\s+in\s+(?=[\[{(])")
 _LEADS = re.compile(
     r"^(?:the\s+)?(?:final\s+)?(?:answer|result)\s*(?:is|:)?\s*|"
     r"^(?:therefore|thus|hence|so)[,:]?\s+",
@@ -393,7 +408,11 @@ def canonical_answer(raw: Any, *, answer_type: str = "") -> str:
         return f"{_fmt_number(qty[0])} {qty[1]}"
     s = s.lower()
     s = re.sub(r"\s+", " ", s).strip().strip(".;").strip()
-    s = _LEADS.sub("", s, count=1).strip()
+    while True:  # "Therefore, the answer is 5" carries two leading phrases
+        stripped = _LEADS.sub("", s, count=1).strip()
+        if stripped == s:
+            break
+        s = stripped
     words = s.strip(" .!")
     kind = (answer_type or "").lower()
     if kind == "proof":
@@ -416,6 +435,12 @@ def canonical_answer(raw: Any, *, answer_type: str = "") -> str:
         items = sorted({_element(a) for a in alts}, key=_sort_key)
         return "{" + ",".join(items) + "}"
     s = _ASSIGN.sub("", s, count=1).strip()
+    s = _MEMBER.sub("", s, count=1).strip()  # "n in {1, 2}" → "{1, 2}"
+    # "n = 2 or 3" / "2 and 5" → a set of values
+    alts = re.split(r"\s+(?:or|and)\s+", s)
+    if len(alts) > 1 and all(0 < len(a) <= 40 for a in alts):
+        items = sorted({_element(a) for a in alts}, key=_sort_key)
+        return "{" + ",".join(items) + "}"
     if s.startswith("{") and s.endswith("}"):
         items = sorted({_element(x) for x in _split_top(s[1:-1])}, key=_sort_key)
         return "{" + ",".join(items) + "}"

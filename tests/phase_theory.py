@@ -666,6 +666,93 @@ def t12():
 chk("params: clamps, aliases and defaults", t12)
 
 
+def t12b():
+    """Review fixes: answer forms, verifier challenges, missing checks, chat history."""
+    from deepthink.theory.answers import canonical_answer as c
+    from deepthink.theory.ledger import TheoryLedger
+
+    # answer forms that must merge
+    assert c("Therefore, the answer is 5.") == c("5") == "5"
+    assert c("2n") == c(r"2 \cdot n") == c("2*n")
+    assert c("3 pi") == c(r"3\pi")
+    assert c("n = 2 or 3") == c("{2, 3}") == c(r"n \in \{3, 2\}")
+    assert c("9.81 m/s^2") == "9.81 m/s^2" and c("5kg") == "5 kg"
+    # a verifier objection cannot refute a corroborated entry on its own
+    L = TheoryLedger()
+    stmt = "Count the lattice points inside the circle of radius 5."
+    e, _ = L.add(member=0, round_=1, cell="r.0", kind="computation", statement=stmt, answer="81")
+    L.add(member=1, round_=1, cell="r.0", kind="computation", statement=stmt, answer="81")
+    assert e.status == "corroborated"
+    tainted, conflict = L.challenge(e.id, "the boundary points were missed", 1)
+    assert not tainted and conflict is not None and e.status == "disputed"
+    L.resolve(conflict.id, "a", "boundary points are not inside")
+    assert e.status == "verified" and conflict.status == "resolved"
+    lone, _ = L.add(
+        member=2,
+        round_=1,
+        cell="r.1",
+        kind="lemma",
+        statement="Every odd square is 1 mod 8.",
+        answer="proof",
+    )
+    tainted, conflict = L.challenge(lone.id, "fails for 9", 1)
+    assert conflict is None and lone.id in tainted and lone.status == "refuted"
+    # a correct result that matches a refuted one opens no conflict
+    fresh, cs = L.add(
+        member=3,
+        round_=2,
+        cell="r.1",
+        kind="lemma",
+        statement="Every odd square is 1 mod 8.",
+        answer="no",
+    )
+    assert not cs and fresh.status == "proposed", (fresh.status, cs)
+
+    # a proposal whose check never ran does not outweigh a checked one
+    def handler(kind, text, st):
+        m = member_of(text)
+        if kind == "decompose":
+            return json.dumps({"easiness": 0.99, "atomic": True})
+        if kind == "solve":
+            ans = "7" if m == 0 else "8"
+            return json.dumps(
+                {"result": f"\\boxed{{{ans}}}", "final_answer": ans, "confidence": 0.9}
+            )
+        if kind == "verify":
+            if "Stated final answer: 7" in text:
+                raise RuntimeError("provider timeout")
+            return json.dumps({"score": 0.8, "verdict": "valid"})
+        return base_reply(kind, text, st)
+
+    res, _, _ = run(
+        Fake(handler), params={"swarm_size": 2, "rounds": 1, "quorum": 1.0, "concurrency": 1}
+    )
+    assert res["final_answer"] == "8", [(v["label"], v["mass"]) for v in res["vote"]]
+
+    # follow-up runs see earlier questions, never earlier reports
+    seen = []
+
+    def spy(kind, text, st):
+        if kind == "sizer":
+            seen.append(text)
+        return base_reply(kind, text, st)
+
+    run(
+        Fake(spy),
+        "Now for n = 7.",
+        params={"swarm_size": 1, "rounds": 1, "max_depth": 0},
+        chat_history=[
+            {"role": "user", "content": "Find a_n for n = 5."},
+            {"role": "assistant", "content": "Answer: \\boxed{99}"},
+            {"role": "user", "content": "Now for n = 7."},
+        ],
+    )
+    assert seen and "Find a_n for n = 5." in seen[0] and "99" not in seen[0]
+
+
+chk("review fixes: answer forms, verifier challenges, unchecked proposals, chat history", t12b)
+
+
 def t13():
     from deepthink import cli
 

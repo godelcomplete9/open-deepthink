@@ -941,12 +941,19 @@ async def _verify(run: _Run, member: Member, round_: int) -> None:
         why = issues[0] if issues else "the verifier found it wrong"
         for eid in _str_list(data.get("refuted"), 12):
             if eid in closure:
-                tainted = run.ledger.refute(
-                    eid, f"refuted by the verifier of QNN {member.index}: {why}"
+                # One verifier call can refute a merely proposed entry. Corroborated or
+                # verified entries only get challenged: the arbiter decides.
+                tainted, opened = run.ledger.challenge(
+                    eid, f"the verifier of QNN {member.index}: {why}", round_
                 )
                 if tainted:
                     await run.log(
                         f"LOG: [BODY OF WORK] {eid} refuted; tainted: {', '.join(tainted)}"
+                    )
+                elif opened is not None:
+                    await run.log(
+                        f"LOG: [BODY OF WORK] {eid} challenged ({opened.id}) by the verifier "
+                        f"of QNN {member.index}; the arbiter will decide"
                     )
 
 
@@ -1035,7 +1042,30 @@ async def _arbitrate(run: _Run, round_: int) -> int:
 
     async def settle(cid: str) -> None:
         c = run.ledger.conflicts[cid]
-        a, b = run.ledger.entries[c.a], run.ledger.entries[c.b]
+        a = run.ledger.entries[c.a]
+        b = run.ledger.entries.get(c.b) if c.b else None
+        rival: dict[str, Any] = (
+            {
+                "b_id": b.id,
+                "b_kind": b.kind,
+                "b_status": b.status,
+                "b_support": b.support,
+                "b_statement": b.statement[:1200],
+                "b_answer": b.answer or "—",
+                "b_result": _excerpt(b.result, 3000),
+            }
+            if b is not None
+            else {
+                # A challenge: B is the objection that entry A is wrong.
+                "b_id": "challenge",
+                "b_kind": "objection",
+                "b_status": "open",
+                "b_support": 1,
+                "b_statement": f"Entry {a.id} is wrong.",
+                "b_answer": "—",
+                "b_result": c.challenge or c.reason,
+            }
+        )
         raw = await run.ask(
             "arbiter",
             run.synth,
@@ -1049,13 +1079,7 @@ async def _arbitrate(run: _Run, round_: int) -> int:
                 "a_statement": a.statement[:1200],
                 "a_answer": a.answer or "—",
                 "a_result": _excerpt(a.result, 3000),
-                "b_id": b.id,
-                "b_kind": b.kind,
-                "b_status": b.status,
-                "b_support": b.support,
-                "b_statement": b.statement[:1200],
-                "b_answer": b.answer or "—",
-                "b_result": _excerpt(b.result, 3000),
+                **rival,
             },
             "arbitrate",
         )
@@ -1177,8 +1201,9 @@ def _dispute_text(run: _Run, clusters: list[Cluster], members: list[Member]) -> 
 def _open_questions(run: _Run) -> str:
     lines = []
     for c in run.ledger.open_conflicts()[:4]:
-        a, b = run.ledger.entries[c.a], run.ledger.entries[c.b]
-        lines.append(f"- unresolved: {_excerpt(a.statement, 160)} ({a.id} vs {b.id})")
+        a = run.ledger.entries[c.a]
+        rival = c.b or "a verifier's objection"
+        lines.append(f"- unresolved: {_excerpt(a.statement, 160)} ({a.id} vs {rival})")
     refuted = [e for e in run.ledger.entries.values() if e.status == "refuted" and not e.proposal]
     for e in refuted[:4]:
         lines.append(f"- refuted: {_excerpt(e.statement, 160)} ({e.id})")
@@ -1265,6 +1290,10 @@ def _ballots(run: _Run, members: list[Member]) -> list[Ballot]:
             quality = score
             if score < run.p["min_verify"]:
                 canon = ""
+        elif run.p["verify"]:
+            # The check never ran (provider error, budget): count it as uncertain,
+            # never as better than a proposal that passed its check.
+            quality = 0.5
         factor = run.ledger.quality(prop.get("entry"), run.p["suspect_penalty"])
         quality *= factor
         if factor <= 0:
@@ -1504,12 +1533,12 @@ async def run_theory_pipeline(
     history = [m for m in (chat_history or []) if isinstance(m, dict)]
     if history and str(history[-1].get("content", "")).strip() == text:
         history = history[:-1]
-    if history:
-        prior = "\n".join(
-            f"{'User' if m.get('role') == 'user' else 'Assistant'}: {m.get('content', '')}"
-            for m in history
-        )
-        text = f"{text}\n\nEarlier in this conversation (context):\n{prior[-3000:]}"
+    # Only the user's earlier turns: earlier reports carry boxed answers that would
+    # anchor every QNN on the previous result.
+    asked = [str(m.get("content", "")) for m in history if m.get("role") == "user"]
+    if asked:
+        prior = "\n".join(f"- {q}" for q in asked)
+        text = f"{text}\n\nEarlier questions in this conversation (context):\n{prior[-3000:]}"
     if document_context:
         try:
             brief = await run.ask(

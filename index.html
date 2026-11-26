@@ -1118,6 +1118,8 @@
             );
             const repoParts = attachedRepositories.map(formatRepoContext);
             brainstormDocumentContext = [...pdfParts, ...codeParts, ...repoParts].join('\n\n---\n\n');
+            // Attachments add a brief call: refresh the Theory Synthesis cost line.
+            document.getElementById('theory_swarm_size')?.dispatchEvent(new Event('input'));
         }
 
         function rebuildQdadContext() {
@@ -1716,7 +1718,9 @@
                 const cells = D > 0 ? Math.min(N, all) : 1;
                 const perQnn = dec + cells + (p.verify ? 1 : 0);
                 const arb = R * 4;
-                return 1 + 1 + S + R * S * perQnn + (R - 1) * (1 + S) + arb + (p.polish ? 1 : 0);
+                // brief (attachments) + sizer (the UI always leaves answer_type on auto) + seeds
+                const brief = (typeof brainstormDocumentContext === 'string' && brainstormDocumentContext) ? 1 : 0;
+                return brief + 1 + 1 + S + R * S * perQnn + (R - 1) * (1 + S) + arb + (p.polish ? 1 : 0);
             };
             const estimateQdadCalls = (n, steps) => {
                 const N = Math.max(2, n || 3);
@@ -2437,6 +2441,12 @@
                     || msg === 'success: graph execution completed.'
                 ) {
                     endGraphRun('log:' + rawMessage.slice(0, 80));
+                }
+                // A failed Theory Synthesis run never sends FINAL_ANSWER: release the chat.
+                if (msg.includes('theory synthesis graph background error') && nodeChatInstance) {
+                    nodeChatInstance.removeThinking();
+                    nodeChatInstance.appendAIMessage('∑ **Theory Synthesis failed.** ' + rawMessage.replace(/^ERROR:\s*/, ''));
+                    nodeChatInstance.finishStreaming();
                 }
             }
 
