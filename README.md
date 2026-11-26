@@ -871,4 +871,4 @@ Not more agents. Better *becoming* agents.
 
 ---
 
-*Version 0.3.0 — See [RELEASE_NOTES.md](./RELEASE_NOTES.md) for the full history.*
+*Version 0.4.0 — See [RELEASE_NOTES.md](./RELEASE_NOTES.md) for the full history.*

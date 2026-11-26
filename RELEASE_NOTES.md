@@ -1,4 +1,4 @@
-# Release Notes — Unreleased
+# Release Notes — `0.4.0`
 
 **Tagline:** "Theory Synthesis: a swarm of QNNs, one body of work" · "RSI for cybersecurity on Agent Mechanics"
 
