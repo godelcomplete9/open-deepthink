@@ -8,7 +8,7 @@ Usage::
     deepthink theory --prompt "…" [--swarm 5] [--domain olympiad] [--debug]
     deepthink qnn  --prompt "…" [--debug]
     deepthink qdad --prompt "…" [--debug]
-    deepthink rsi  --input policy.txt [--repo DIR] [--social profile.json] [--drive leak|stock|bal] [--offline]
+    deepthink rsi  --input policy.txt [--repo DIR] [--social profile.json] [--evolve] [--drive leak|stock|bal] [--offline]
     deepthink version
 """
 
@@ -358,6 +358,18 @@ def cmd_rsi(args: argparse.Namespace) -> int:
         params["social_profile"] = args.social
     if args.surface_remote_mapping:
         params["surface_remote_mapping"] = True
+    if args.evolve:
+        params["evolve"] = {
+            "enabled": True,
+            "universes": args.universes,
+            "generations": args.generations,
+            "keep": args.survivors,
+            "ticks": args.evolve_ticks,
+            "probes": args.probes,
+            "trigger": args.evolve_trigger,
+            "adopt": args.evolve_adopt,
+            "seed": args.evolve_seed,
+        }
     if args.lora or args.lora_program:
         params["lora"] = {
             "enabled": bool(args.lora),
@@ -599,6 +611,37 @@ def build_parser() -> argparse.ArgumentParser:
         "--surface-remote-mapping",
         action="store_true",
         help="Also send code and social facts to the remote mapper (default: offline lexicon)",
+    )
+    p_rsi.add_argument(
+        "--evolve",
+        action="store_true",
+        help="Active evolution: breed alternate universes in the lattice, each read as a what-if on the policy",
+    )
+    p_rsi.add_argument("--universes", type=int, default=6, help="Universes per generation (1-16)")
+    p_rsi.add_argument("--generations", type=int, default=2, help="Generations per loop (1-4)")
+    p_rsi.add_argument(
+        "--survivors", type=int, default=3, help="Universes that breed the next generation"
+    )
+    p_rsi.add_argument(
+        "--evolve-ticks", type=int, default=3, help="Ticks each universe runs before it is scored"
+    )
+    p_rsi.add_argument(
+        "--probes", type=int, default=2, help="ω probes per loop: restrictions reversed"
+    )
+    p_rsi.add_argument(
+        "--evolve-trigger",
+        choices=("always", "calm"),
+        default="always",
+        help="calm = branch only when no agent leaks (equilibrium)",
+    )
+    p_rsi.add_argument(
+        "--evolve-adopt",
+        choices=("none", "gate"),
+        default="none",
+        help="gate = apply the best universe to the policy when posture rises with no new contradiction",
+    )
+    p_rsi.add_argument(
+        "--evolve-seed", type=int, default=None, help="Seed for reproducible universes"
     )
     p_rsi.add_argument(
         "--iterations", type=int, default=None, help="Loops (correspond, tick, heal, stock, lora)"

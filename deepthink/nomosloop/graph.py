@@ -23,23 +23,27 @@ Nodes:
                    ranks, ensembles, clashes                            (none)
   heal             leaking agents heal; findings in the policy        (driver)
   stock            stocking agents propose controls (posture-gated)   (driver)
+  evolve           active evolution (toggle): alternate universes bred
+                   with the treatise's operators, read as what-ifs     (none)
   lora             distil traces; clamp the adapter into the driver     (none)
   artifact_emit    hardened policy + findings report + NX-1 report      (none)
 
-Edges: ingest -> scale_induction -> correspond -> tick -> heal -> stock -> lora
+Edges: ingest -> scale_induction -> correspond -> tick -> heal -> stock -> evolve -> lora
        lora -> correspond while iteration < max_iterations, else artifact_emit -> END.
+       evolve passes straight through unless ``rsi_cfg["evolve"]["enabled"]``.
 """
 
 from __future__ import annotations
 
 import copy
+import hashlib
 import os
 from collections.abc import Callable
 from typing import Any
 
 from langgraph.graph import END, StateGraph
 
-from . import agents, security, surface, wsp
+from . import agents, evolution, security, surface, wsp
 from . import correspondence as tc
 from . import lora as lora_mod
 from .mechanics import agent_name
@@ -56,6 +60,7 @@ TOPOLOGY: dict[str, Any] = {
         "tick",
         "heal",
         "stock",
+        "evolve",
         "lora",
         "artifact_emit",
     ],
@@ -65,11 +70,12 @@ TOPOLOGY: dict[str, Any] = {
         ["correspond", "tick"],
         ["tick", "heal"],
         ["heal", "stock"],
-        ["stock", "lora"],
+        ["stock", "evolve"],
+        ["evolve", "lora"],
     ],
     "entry": "ingest",
     "conditional": {"lora": {"to_correspond_if": "iteration < max_iterations else artifact_emit"}},
-    "version": "graph/v1-leak-stock-security",
+    "version": "graph/v2-leak-stock-evolve-security",
 }
 
 # Optional live observer (GUI / telemetry): observer(phase, node, state, update).
@@ -599,6 +605,113 @@ def stock_node(state: NomosState) -> dict[str, Any]:
     }
 
 
+def evolve_node(state: NomosState) -> dict[str, Any]:
+    """Active evolution (toggle): alternate universes bred in the lattice, read as what-ifs."""
+    cfg = _cfg(state)
+    ecfg = evolution.EvolveConfig.from_dict(cfg.get("evolve"))
+    if not ecfg.enabled:
+        return {"topology_log": ["evolve: off"]}
+    world = _world(state)
+    loop = int(state.get("iteration", 0)) + 1
+    hist = list(state.get("evolution", []) or [])
+    leaking = sum(1 for a in world.live().values() if a.state == "leak")
+    if ecfg.trigger == "calm" and leaking:
+        hist.append(
+            {"loop": loop, "skipped": f"{leaking} agents leak", "universes": [], "probes": []}
+        )
+        return {
+            "world": world,
+            "evolution": hist,
+            "topology_log": [f"evolve: skipped, {leaking} agents leak (trigger=calm)"],
+        }
+    lattice: dict[str, Any] = copy.deepcopy(dict(state.get("scale_lattice", {})))
+    if ecfg.seed is not None:
+        seed = ecfg.seed + loop - 1
+    else:
+        digest = hashlib.sha256(f"{state.get('law_hash', '')}:{loop}".encode()).hexdigest()
+        seed = int(digest[:8], 16)
+    out = evolution.evolve(
+        world,
+        lattice,
+        list(state.get("surface_facts", []) or []),
+        ecfg,
+        loop=loop,
+        seed=seed,
+        mutators=int(cfg.get("mutators", 8)),
+    )
+    cand = out.pop("candidate", None)
+    update: dict[str, Any] = {}
+    adopted = None
+    if ecfg.adopt == "gate" and cand:
+        new_lat = copy.deepcopy(cand["lattice"])
+        new_lat["version"] = _next_version(str(lattice.get("version", "v0")))
+        tag = f"rsi:evolve:{cand['id']}"
+        for lv in new_lat.get("levels", []) or []:
+            for r in lv.get("rules", []) or []:
+                ref = f"pol/{lv.get('level_id')}/{r.get('id')}"
+                if str(r.get("provenance", "")).startswith("evolve:") or ref in cand["replaced"]:
+                    r["provenance"] = tag
+        by_ref = {r.ax_ref: r.agent_id for r in world.rows if r.alive}
+        for new_ref, root in cand["roots"].items():
+            if root in by_ref:
+                world.pending_parent[new_ref] = by_ref[root]
+        nodes, _ = tc.lattice_ax(new_lat, [])
+        nmap = {n.ref: n for n in nodes}
+        for ref in cand["replaced"]:
+            if ref in nmap:
+                world.reproject(nmap[ref], "evolve-lexicon")
+        pos = security.posture(new_lat)
+        update = {
+            "scale_lattice": new_lat,
+            "lattice_history": [
+                *(state.get("lattice_history", []) or []),
+                copy.deepcopy(new_lat),
+            ],
+            "posture_history": [
+                *(state.get("posture_history", []) or []),
+                {
+                    "version": new_lat["version"],
+                    "iteration": loop,
+                    "source": f"evolve:{cand['id']}",
+                    **pos,
+                },
+            ],
+        }
+        adopted = cand["id"]
+        world.event(
+            "adopt",
+            by_ref.get(cand["roots"].get(next(iter(cand["roots"]), ""), ""), "I1"),
+            f"adopt({cand['id']}) => policy {new_lat['version']} posture {pos['score']:.3f}",
+            universe=cand["id"],
+        )
+    out["adopted"] = adopted
+    for u in out["universes"][:6] + out["probes"]:
+        ops = " ".join(f"{m['symbol']}@{m['site'].split('/')[-1]}" for m in u["mutations"])
+        world.event(
+            "branch",
+            u["mutations"][0]["agent"],
+            f"branch({u['id']}: {ops}) => {u['verdict']} "
+            f"dP={u['delta']['posture']:+.3f} dL={u['delta']['L_G']:+.3f}",
+            universe=u["id"],
+        )
+    buf = list(state.get("lora_buffer", []) or [])
+    for u in out["universes"][:3] + out["probes"][:1]:
+        answer = f"{u['verdict']}: " + ("; ".join(u["consequences"][:5]) or "no measurable change")
+        buf.append(
+            lora_mod.example("evolve", f"Policy {lattice.get('version')}. {u['what_if']}", answer)
+        )
+    hist.append(out)
+    best = out["universes"][0] if out["universes"] else None
+    line = (
+        f"evolve: {len(out['universes'])} universes over {len(out['survivors'])} generations, "
+        f"{len(out['probes'])} ω probes (seed {seed})"
+    )
+    if best:
+        line += f"; best {best['id']} ({best['verdict']}, fitness {best['fitness']:.2f}): {best['what_if'][:90]}"
+    line += f"; adopted: {adopted or 'none'}"
+    return {"world": world, "evolution": hist, "lora_buffer": buf, "topology_log": [line], **update}
+
+
 def lora_node(state: NomosState) -> dict[str, Any]:
     cfg = _cfg(state)
     world = _world(state)
@@ -743,10 +856,22 @@ def security_report(state: NomosState, world: World) -> str:
             tag = " **(RSI)**" if str(r.get("provenance", "")).startswith("rsi:") else ""
             lines.append(f"- {r.get('id')} {r.get('rewrite', '')}{tag}")
         lines.append("")
+    if lat.get("links"):
+        lines.append(
+            "_Links: "
+            + "; ".join(
+                f"{ln.get('from', '').split('/')[-1]} → {ln.get('to', '').split('/')[-1]} ({ln.get('kind')})"
+                for ln in lat["links"]
+            )
+            + "_"
+        )
+        lines.append("")
     facts = list(state.get("surface_facts", []) or [])
     if facts or state.get("surface_meta"):
         rows = surface.register(facts, surface.link(facts, lat))
         lines += surface.report_lines(rows, dict(state.get("surface_meta") or {}))
+    if state.get("evolution"):
+        lines += evolution.report_lines(list(state.get("evolution") or []))
     if last.get("functions"):
         lines += [
             "## Function coverage",
@@ -775,6 +900,7 @@ def build_graph():
         ("tick", tick_node),
         ("heal", heal_node),
         ("stock", stock_node),
+        ("evolve", evolve_node),
         ("lora", lora_node),
         ("artifact_emit", artifact_emit_node),
     ):

@@ -215,8 +215,49 @@ const RsiMode = (() => {
         }
     }
 
+    const VERDICT_NOTE = {
+        dissolves: 'removes a contradiction', improves: 'posture rises', breeds: 'breeds a new structure',
+        leaks: 'the lattice leaks where the text shows nothing', breaks: 'adds a contradiction', neutral: 'no measurable change',
+        'load-bearing': 'reversing it heats the lattice', slack: 'reversing it changes little',
+    };
+
+    function universeCard(u, adopted) {
+        const d = u.delta || {};
+        const sign = v => (v > 0 ? '+' : '') + Number(v || 0).toFixed(3);
+        const ops = (u.mutations || []).map(m => `<code>${esc(m.symbol)}@${esc(String(m.site).split('/').pop())}</code>`).join(' ');
+        const badge = adopted === u.id ? ' · <b style="color: var(--app-accent-green, #34d399)">adopted</b>'
+            : (!u.probe && !u.adoptable ? ' · <span class="app-hint" title="rewrites, removals and anything that weakens a restriction are never adopted">what-if only</span>' : '');
+        return `<div class="rsi-finding rsi-universe rsi-universe--${esc(u.verdict)}">
+            <div class="rsi-finding__head"><b>${esc(u.id)}</b> ${ops} · <b>${esc(u.verdict)}</b> <span class="app-hint">${esc(VERDICT_NOTE[u.verdict] || '')}</span>${badge}
+            <span class="rsi-capacity__meta">${u.probe ? `heat ${Number(u.heat || 0).toFixed(2)}` : `fitness ${Number(u.fitness).toFixed(2)}`} · Δposture ${sign(d.posture)} · Δcontradictions ${d.contradictions > 0 ? '+' : ''}${d.contradictions ?? 0} · ΔL_G ${sign(d.L_G)}${(u.parents || []).length ? ` · from ${esc(u.parents.join(' + '))}` : ''}${u.crossover ? ' · crossover' : ''}</span></div>
+            <p class="rsi-universe__whatif">${esc(u.what_if)}</p>
+            ${(u.diff || []).map(l => `<div class="rsi-clash"><code>${esc(l)}</code></div>`).join('')}
+            ${(u.consequences || []).length ? `<p>${esc(u.consequences.join('; '))}.</p>` : ''}
+            ${(u.mutations || []).filter(m => m.agent_change).map(m => `<div class="rsi-capacity__meta">${esc(m.symbol)}: ${esc(m.agent_change)}</div>`).join('')}
+            ${(u.structures || []).map(s => `<div class="rsi-capacity__meta">bred <code>${esc(s.agent)}</code> ${esc(s.name)}${s.klein_close ? ' · Klein-close' : ''}</div>`).join('')}
+        </div>`;
+    }
+
+    function renderUniverses(evo) {
+        const box = $('rsi-universes');
+        const us = (evo && evo.universes) || [];
+        const probes = (evo && evo.probes) || [];
+        $('rsi-tab-universes-n').textContent = us.length ? ` ${us.length}` : '';
+        if (!box) return;
+        if (!evo || (!us.length && !probes.length)) {
+            box.innerHTML = evo && evo.skipped
+                ? `<span class="rsi-empty">Loop ${esc(evo.loop)}: no branching, ${esc(evo.skipped)} (branch only at equilibrium).</span>`
+                : '<span class="rsi-empty">Turn on Active evolution to breed alternate universes. Each one is a what-if on the policy, with its edits, consequences and the structures it bred.</span>';
+            return;
+        }
+        const b = evo.baseline || {};
+        box.innerHTML = `<div class="rsi-capacity__meta">Loop ${esc(evo.loop)} · seed ${esc(evo.seed)} · baseline posture ${Number(b.posture || 0).toFixed(3)}, ${b.contradictions ?? 0} contradictions, L_G ${Number(b.L_G || 0).toFixed(3)} · adopted: ${esc(evo.adopted || 'none')}</div>`
+            + us.map(u => universeCard(u, evo.adopted)).join('')
+            + (probes.length ? '<div class="rsi-capacity__meta" style="margin-top:0.8rem">ω probes: what if a restriction were reversed?</div>' + probes.map(u => universeCard(u, null)).join('') : '');
+    }
+
     function onState(st, ev) {
-        if (st) { renderPosture(st); renderFunctions(st); renderAgents(st); renderLists(st); }
+        if (st) { renderPosture(st); renderFunctions(st); renderAgents(st); renderLists(st); renderUniverses(st.evolution); }
         if (ev && ev.type === 'complete') { markStage(null); return; }
         pushLoopLog(ev);
     }
@@ -243,6 +284,7 @@ const RsiMode = (() => {
         $('rsi-download-btn').disabled = !report;
         if (result.snapshot) renderLists(result.snapshot);
         renderSurface(result);
+        if (result.snapshot) renderUniverses(result.snapshot.evolution);
         showPane((result.findings || []).length ? 'findings' : 'controls');
     }
 
@@ -314,6 +356,17 @@ const RsiMode = (() => {
             mapper_arc_agi2: val('rsi-mapper-arc'),
             repo_path: val('rsi-repo-path'),
             social_profile: val('rsi-social'),
+            evolve: $('rsi-evolve-on') && $('rsi-evolve-on').checked ? {
+                enabled: true,
+                universes: Math.round(num('rsi-evolve-universes', 6)),
+                generations: Math.round(num('rsi-evolve-generations', 2)),
+                keep: Math.round(num('rsi-evolve-keep', 3)),
+                ticks: Math.round(num('rsi-evolve-ticks', 3)),
+                probes: Math.round(num('rsi-evolve-probes', 2)),
+                trigger: val('rsi-evolve-trigger') || 'always',
+                adopt: val('rsi-evolve-adopt') || 'none',
+                seed: val('rsi-evolve-seed') === '' ? null : Math.round(num('rsi-evolve-seed', 0)),
+            } : { enabled: false },
             lora: {
                 enabled: $('rsi-lora-on').checked,
                 adapter_id: Math.round(num('rsi-lora-id', 0)),
@@ -403,6 +456,7 @@ const RsiMode = (() => {
         $('rsi-form').addEventListener('submit', start);
         $('rsi-download-btn').addEventListener('click', download);
         $('rsi-wsp-on')?.addEventListener('change', ev => $('rsi-wsp-fields')?.classList.toggle('hidden', !ev.target.checked));
+        $('rsi-evolve-on')?.addEventListener('change', ev => $('rsi-evolve-fields')?.classList.toggle('hidden', !ev.target.checked));
         document.querySelectorAll('[data-rsi-pane]').forEach(b => b.addEventListener('click', () => showPane(b.dataset.rsiPane)));
         document.querySelectorAll('[data-rsi-drive]').forEach(b => b.addEventListener('click', () => setDrive(b.dataset.rsiDrive)));
         SLIDERS.forEach(k => {

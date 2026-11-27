@@ -1,5 +1,14 @@
 # Release Notes — unreleased
 
+### RSI: active evolution (alternate universes)
+* New toggle (`params["evolve"]`, `deepthink rsi --evolve`, *Active evolution* in the RSI tab) and graph node `evolve` between `stock` and `lora` (`deepthink/nomosloop/evolution.py`)
+* Agents branch the world into alternate universes and mutate with the treatise's operators, unlocked by rank: Klein flips (`ev_a`, `ev_r`, `ev_ra`), `σ` stems, `store4` rings (II→III), `η_g` hairpins with Klein-close children (III→IV), births by the birth law `a·(αX, βY)`, `→` splits, `cut` precedences and `†` dissolutions; `ω` probes reverse restrictions to find load-bearing clauses
+* Each universe is a what-if on the policy: plain sentence, diff, consequences in both spaces, bred agents with NX-1 names and Klein-closeness, and a verdict (dissolves, breaks, leaks, breeds, improves, neutral)
+* Generations: survivors breed one more mutation each, and the two best are crossed over; fitness weighs policy and lattice by `λ_AM`; seeded and reproducible; no model calls
+* `adopt: gate` applies the best additive, non-weakening universe whose posture rises with no new contradiction; rewrites, removals, reversals and weakened restrictions are never adopted. `trigger: calm` branches only when no agent leaks
+* Explicit precedence (`except where §7 applies`) now settles a contradiction and no longer flips a clause's polarity; lattices may declare `links`
+* Reports gain an *Alternate universes* section; NX-1 logs gain `branch` and `adopt` events; the LoRA dataset gains what-if traces
+
 ### RSI: code and people beside the policy
 * **Repository analysis** (`deepthink/nomosloop/repo.py`, `deepthink rsi --repo DIR`): code and configuration are read for 16 kinds of security defect; secrets are redacted, nothing is executed, and symlinks, VCS and dependency folders, binaries and large files are skipped
 * **Social-engineering layer** (`deepthink/nomosloop/social.py`, `--social profile.json`): a role-level profile of procedures is checked for pretexting resets, payment redirection without dual control, urgency overrides, missing reporting channels, untrained exposed roles, public exposure and untested procedures. An `authorization` block is required; personal and psychometric data is dropped and listed as not admitted

@@ -46,7 +46,7 @@ import traceback
 from collections.abc import Callable
 from typing import Any
 
-from . import repo, social, surface
+from . import evolution, repo, social, surface
 from .graph import describe_topology, run_pipeline, set_observer
 from .routing import is_local_llm, llm_endpoint
 from .world import World
@@ -79,6 +79,9 @@ def default_rsi_params() -> dict[str, Any]:
         "repo_path": "",  # local repository or file to analyse beside the policy
         "social_profile": None,  # role-level profile (dict, JSON text or .json path)
         "surface_remote_mapping": False,  # send code/social facts to a remote mapper
+        # active evolution (evolution.EvolveConfig): {enabled, universes, generations, keep,
+        # ticks, probes, trigger: always|calm, adopt: none|gate, seed}
+        "evolve": {},
     }
 
 
@@ -165,6 +168,7 @@ def snapshot_state(state: dict[str, Any]) -> dict[str, Any]:
         "lora": lst.as_dict() if hasattr(lst, "as_dict") else {},
         "iteration": int(state.get("iteration", 0) or 0),
         "max_iterations": int(state.get("max_iterations", 1) or 1),
+        "evolution": evolution.compact(list(state.get("evolution", []) or [])),
         **w,
     }
 
@@ -189,6 +193,15 @@ def _summary(state: dict[str, Any], world: World | None) -> str:
             f"- code facts: {by['code']} · social-engineering facts: {by['social']} · "
             f"contradicting the policy: {contra} · not covered: "
             f"{sum(1 for r in rows if r['status'] == 'uncovered')}"
+        )
+    evo = [r for r in state.get("evolution", []) or [] if r.get("universes")]
+    if evo:
+        n = sum(len(r["universes"]) for r in evo)
+        best = max((u for r in evo for u in r["universes"]), key=lambda u: u["fitness"])
+        adopted = [r["adopted"] for r in evo if r.get("adopted")]
+        lines.append(
+            f"- universes: {n} over {len(evo)} loops · best {best['id']} ({best['verdict']}) · "
+            f"adopted: {', '.join(adopted) or 'none'}"
         )
     if world:
         lines.append(
@@ -269,6 +282,7 @@ async def run_rsi_pipeline(
         "cot": bool(p.get("cot", True)),
         "mapper_arc_agi2": p.get("mapper_arc_agi2"),
         "surface_remote_mapping": bool(p.get("surface_remote_mapping", False)),
+        "evolve": evolution.EvolveConfig.from_dict(p.get("evolve")).as_dict(),
     }
     surface_facts, surface_meta = await asyncio.to_thread(
         collect_surface, raw_text, str(p.get("repo_path") or ""), p.get("social_profile")
@@ -420,6 +434,7 @@ async def run_rsi_pipeline(
             "rounds_per_solve": round(world.rounds_per_solve(), 4) if world else 0.0,
             "surface": surface_meta,
             "discrepancies": discrepancies,
+            "evolution": state.get("evolution", []) or [],
             "lora": lst.as_dict() if hasattr(lst, "as_dict") else {},
             "iteration": int(state.get("iteration", 0) or 0),
             "artifact_path": state.get("artifact_path", ""),

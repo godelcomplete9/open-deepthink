@@ -2072,6 +2072,12 @@ async def start_rsi(payload: dict = Body(...)):
         social_profile = _rsi_social_profile(payload.get("social_profile"))
     except ValueError as e:
         return JSONResponse(status_code=400, content={"message": str(e)})
+    evolve_in = payload.get("evolve") or {}
+    if not isinstance(evolve_in, dict):
+        return JSONResponse(status_code=400, content={"message": "evolve must be an object."})
+    from deepthink.nomosloop.evolution import EvolveConfig
+
+    evolve = EvolveConfig.from_dict(evolve_in).as_dict()  # clamped
 
     try:
         driver, mapper = _build_rsi_models(payload)
@@ -2112,6 +2118,7 @@ async def start_rsi(payload: dict = Body(...)):
                     "lora": lora,
                     "repo_path": repo_path,
                     "social_profile": social_profile,
+                    "evolve": evolve,
                 },
                 log=_log,
                 on_event=_on_event,

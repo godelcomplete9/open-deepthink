@@ -105,6 +105,7 @@ class NomosState(TypedDict, total=False):
     # code and social-engineering artifacts beside the policy (surface.py)
     surface_facts: list[dict[str, Any]]  # Fact dicts from repo.py and social.py
     surface_meta: dict[str, Any]  # {"code": scan metadata, "social": profile metadata}
+    evolution: list[dict[str, Any]]  # active evolution, one record per loop (evolution.py)
     # lattice (AM) + correspondence (TC): the live three-domain world
     world: Any
     # LoRA loop
@@ -156,6 +157,7 @@ def new_run_state(
         ops_by_ref={},
         surface_facts=[],
         surface_meta={},
+        evolution=[],
         world=None,
         lora_cfg={},
         lora_state=None,

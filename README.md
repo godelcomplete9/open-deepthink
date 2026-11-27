@@ -278,6 +278,8 @@ The engine validates every program before it is used. It snaps the rank to 4–6
 
 The editor is opt-in and has its own tier. It never falls back to the local driver. Without an API key or model id, the program is a deterministic offline one (deduplicated traces, default spec, one clamp step). It sends no sampling parameters, which newer models reject. **It sees trace text that quotes your policy**, so only enable it for policies you may send to that provider.
 
+**7c. Optional: active evolution (alternate universes).** See [Active evolution](#active-evolution-alternate-universes) below. When it is on, a phase between stock and lora branches the lattice into hypothetical universes, breeds new structures in them, and reports each one as a what-if on the policy.
+
 **8. Space and time.** A covered cell is a (clause, function) pair held by a stable, active agent. The benchmark reports cells covered, reasoning rounds per solve, findings, controls and ensemble Leak for each drive. Faster loops and shorter thinking both widen coverage per unit of time. Coverage means an agent stands for that function. It does not mean the function is secure.
 
 ### Beyond the policy: code and people
@@ -299,6 +301,60 @@ Every fact becomes an agent beside the policy's own (`AX:code/C…`, `AX:soc/S�
 The profile needs an `authorization` block naming who authorized the assessment and its scope. Only role-level fields are admitted: names, contact details, biographies, personality data (Big Five, MBTI), behavioural reports and lists of individuals are dropped before analysis and listed in the report as not admitted. The layer finds weak procedures; it does not profile people or write pretexts and lures. See [`examples/security_surface/`](./examples/security_surface/).
 
 Code and procedure facts are mapped with the offline lexicon (plus the species each detector assigns) unless you pass `surface_remote_mapping`, so repository content and role descriptions do not reach a remote mapper by default. In the web UI, a repository path is accepted only under the folders listed in `RSI_REPO_ROOTS` on the server; the CLI reads any local path you give it.
+
+### Active evolution: alternate universes
+
+Heal and stock only move when something leaks or has a surplus. At equilibrium, with nothing leaking and no control left that raises posture, the loop has nothing new to try until the policy changes. **Active evolution** is a toggle that keeps it exploring. Each loop, agents branch the world into alternate universes, mutate inside the lattice with the treatise's operators, and breed new structures. Every universe reads as a **what if** on the policy.
+
+| Operator | In the lattice (treatise) | What if, in the policy |
+|---|---|---|
+| `ev_a`, `ev_r`, `ev_ra` | the online writing moves to a Klein image; the identifier is kept (Apparatus §2; IV·bis §8, evolution) | the clause is mirrored (inbound ↔ outbound, read ↔ write), serves its complementary function, or becomes institution-wide |
+| `σ` stem | a storing edge to the agent whose hero covers this agent's weakest slot (NX-1 §5; Part IV §5, I→II) | the clause is explicitly backed by the clause that covers what it holds least |
+| `→×4` store4 | three children close a four-cycle of stems (Part IV §5, II→III) | the loop is closed with three controls: log, alert, review |
+| `η_g` hairpin | a Klein-close child of its parent, paid with energy (Part IV §5, III→IV) | the clause and its mirror, complement or norm form become one standard |
+| `a·(αX, βY)` birth | the birth law: a child Klein-close to the winner, stocked with `r` of the residual the pair cannot store (Part I §9; IV·bis Table 4) | a new clause for what two linked clauses lose between them |
+| `→` arrow | the parent dissolves and two children share its mass (NX-1 §6.4; restriction) | the clause is split in two at its "and" |
+| `cut` | the opponent's edge is cut, `w → 0` (NX-1 §6.4) | the clause yields: "…, except where §j applies" |
+| `†` | dissolution: tombstone `!x` (IV·bis §8) | the clause is removed |
+| `ω` | off-license emission, heat only (NX-1 §5) | the restriction is reversed (a probe) |
+
+**Operators unlock by rank**, as in Part IV, and every step is paid with energy (`x ≥ 1`). Any agent can flip or stem. A `Res` agent can close a ring. A `Cyc` agent can hairpin. A linked pair whose encounter leaks can give birth. So structures breed structures across generations: a ring bred in generation 1 lifts its members toward `Cyc`, and in generation 2 they can hairpin.
+
+**How a loop runs.** The current world is forked into a baseline and *N* universes, each with one licensed mutation sampled by weight. Repair operators weigh more where agents leak; generative ones weigh more where they stock. Every universe syncs to its hypothetical policy, ticks, and is measured in both spaces against the baseline ticked the same number of times:
+
+- **policy:** posture, contradictions, and functions covered or lost;
+- **lattice:** ensemble leak, clash mass, leaking agents, new rings and the ranks of bred agents.
+
+Fitness weighs the two with `λ_AM`. The survivors breed the next generation, each with one more mutation, and the two best with disjoint edits are crossed over (the union of their edits, replayed from the base). `ω` probes run beside them, reversing restrictions one at a time to show which clauses are **load-bearing**.
+
+**Reading a universe.** Each one carries:
+
+- its **what if**, in plain words;
+- its **diff**: `~` rewritten, `+` added, `−` removed, `↔` linked;
+- its **consequences**, for example "dissolves the contradiction §5 × §8", "covers audit logging" or "new clash in the lattice: §13 × §6·review";
+- what changed in the lattice, and the **agents it bred**, with their NX-1 names and whether they are Klein-close to their parents;
+- a **verdict**.
+
+| Verdict | Meaning |
+|---|---|
+| `dissolves` | removes a contradiction from the policy |
+| `breaks` | adds a contradiction |
+| `leaks` | the policy text shows no contradiction, but the lattice leaks: a strong new clash, a new leaking agent, or higher ensemble leak |
+| `breeds` | bred a ring or an agent at `Res` or above, without leaking |
+| `improves` | posture rises |
+| `neutral` | no measurable change |
+| `load-bearing` / `slack` | for `ω` probes: reversing the restriction heats the lattice, or barely changes it |
+
+**Adoption.** By default, universes are what-ifs only and the real loop is untouched; the tests check that posture, controls and findings come out identical with evolution on. With `adopt: gate`, the best universe whose posture rises with no new contradiction is applied to the policy, and its agents are re-derived from the adopted text at the next correspond. Only additions, splits, links and explicit precedences can be adopted. Rewrites (`ev`), removals (`†`), reversals (`ω`) and anything that weakens a restriction stay what-ifs: a restriction yielding to a permission, for example, is never adopted.
+
+Universes are seeded and reproducible (`seed`, or one derived from the policy and the loop), make **no model calls**, and use the offline lexicon for new or rewritten clauses. With `trigger: calm`, branching happens only when no agent leaks, which is the equilibrium case. Every branch is logged as an NX-1 event (`branch(U1-2.3: η_a@§12) => breeds …`), and the best universes are added to the LoRA dataset as what-if traces.
+
+```powershell
+deepthink rsi --input examples/security/institution_access_policy.txt --offline --iterations 2 --evolve --universes 8 --generations 2 --evolve-seed 1
+deepthink rsi --input examples/security/institution_access_policy.txt --offline --evolve --evolve-trigger calm --evolve-adopt gate
+```
+
+In the web UI, tick **Active evolution** in the RSI tab. The universes appear in the **Universes** results tab, and `evolve` joins the loop ring. Mass shares, licensing thresholds and fitness weights are conventions of this engine; the treatise leaves them open ([OG6]).
 
 ### Drives and sensitivity
 
@@ -391,9 +447,9 @@ Leak-driven runs produce the most findings and the lowest ensemble Leak. Stock-d
 
 ### What is measured and what is not
 
-- **Measured:** contradictions found by the parser, code and procedure facts and their status against the policy, posture before and after, conservation of the tick law, gauge invariance, which controls pass the gate, rounds per solve, and the LoRA keep/rollback decisions.
+- **Measured:** contradictions found by the parser, code and procedure facts and their status against the policy, each universe's posture, contradictions, ensemble leak, clash mass and bred structures against a baseline ticked as long, posture before and after, conservation of the tick law, gauge invariance, which controls pass the gate, rounds per solve, and the LoRA keep/rollback decisions.
 - **Readings, not measurements:** the mapping of clauses to species, the climate field of names, and every treatise parameter.
-- **Not claimed:** that a higher posture means a safer institution, that findings are complete (repository analysis is pattern based and misses what its detectors do not describe; the social layer only sees what the profile states), or that the LoRA adapter improves your model. Whether a trained adapter helps is for you to evaluate on your own traces.
+- **Not claimed:** that a higher posture means a safer institution, that findings are complete (repository analysis is pattern based and misses what its detectors do not describe; the social layer only sees what the profile states), that a universe's verdict predicts what the change would do in the institution (it is what the change does to the text and the lattice), or that the LoRA adapter improves your model. Whether a trained adapter helps is for you to evaluate on your own traces.
 
 ---
 

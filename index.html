@@ -169,6 +169,56 @@
                 </div>
 
                 <div class="app-subpanel">
+                    <div class="app-control-group">
+                        <input type="checkbox" id="rsi-evolve-on">
+                        <label for="rsi-evolve-on"><b>Active evolution</b>: agents branch into alternate universes, mutating with the treatise's operators, and each universe reads as a "what if" on the policy</label>
+                    </div>
+                    <div id="rsi-evolve-fields" class="hidden" style="margin-top: 0.6rem;">
+                        <div class="app-control-row">
+                            <div class="rsi-field">
+                                <label for="rsi-evolve-universes">Universes / generation</label>
+                                <input type="number" id="rsi-evolve-universes" class="app-input--compact app-input--narrow" value="6" min="1" max="16">
+                            </div>
+                            <div class="rsi-field">
+                                <label for="rsi-evolve-generations">Generations</label>
+                                <input type="number" id="rsi-evolve-generations" class="app-input--compact app-input--narrow" value="2" min="1" max="4">
+                            </div>
+                            <div class="rsi-field">
+                                <label for="rsi-evolve-keep">Survivors</label>
+                                <input type="number" id="rsi-evolve-keep" class="app-input--compact app-input--narrow" value="3" min="1" max="8">
+                            </div>
+                            <div class="rsi-field">
+                                <label for="rsi-evolve-ticks">Ticks / universe</label>
+                                <input type="number" id="rsi-evolve-ticks" class="app-input--compact app-input--narrow" value="3" min="1" max="8">
+                            </div>
+                            <div class="rsi-field">
+                                <label for="rsi-evolve-probes">ω probes</label>
+                                <input type="number" id="rsi-evolve-probes" class="app-input--compact app-input--narrow" value="2" min="0" max="6">
+                            </div>
+                            <div class="rsi-field">
+                                <label for="rsi-evolve-trigger">Branch</label>
+                                <select id="rsi-evolve-trigger" class="app-input--compact">
+                                    <option value="always" selected>every loop</option>
+                                    <option value="calm">only at equilibrium (no agent leaks)</option>
+                                </select>
+                            </div>
+                            <div class="rsi-field">
+                                <label for="rsi-evolve-adopt">Adopt</label>
+                                <select id="rsi-evolve-adopt" class="app-input--compact">
+                                    <option value="none" selected>never (what-ifs only)</option>
+                                    <option value="gate">best universe, if posture rises with no new contradiction</option>
+                                </select>
+                            </div>
+                            <div class="rsi-field">
+                                <label for="rsi-evolve-seed">Seed</label>
+                                <input type="number" id="rsi-evolve-seed" class="app-input--compact app-input--medium" placeholder="auto">
+                            </div>
+                        </div>
+                        <span class="app-hint">Operators unlock by rank: any agent can flip (ev) or stem (σ), a Res agent can close a log-alert-review ring (store4), a Cyc agent can hairpin a Klein-close child (η), and a linked pair that leaks can give birth (a·(αX, βY)). ω probes reverse a restriction to see which clauses bear load; they, removals and anything that weakens a restriction are never adopted. No model calls.</span>
+                    </div>
+                </div>
+
+                <div class="app-subpanel">
                     <div class="app-subpanel__title">Drive</div>
                     <div class="rsi-drive" role="group" aria-label="Drive">
                         <button type="button" class="mode-tab" data-rsi-drive="leak">🛡 Leak · defensive</button>
@@ -304,6 +354,7 @@
                 <button type="button" class="mode-tab active" data-rsi-pane="findings">🛡 Findings<span id="rsi-tab-findings-n"></span></button>
                 <button type="button" class="mode-tab" data-rsi-pane="controls">🌱 Controls<span id="rsi-tab-controls-n"></span></button>
                 <button type="button" class="mode-tab" data-rsi-pane="surface">Code &amp; people<span id="rsi-tab-surface-n"></span></button>
+                <button type="button" class="mode-tab" data-rsi-pane="universes">Universes<span id="rsi-tab-universes-n"></span></button>
                 <button type="button" class="mode-tab" data-rsi-pane="report">Hardened policy</button>
                 <button type="button" class="mode-tab" data-rsi-pane="toc">Correspondences</button>
                 <button type="button" class="mode-tab" data-rsi-pane="lora">LoRA</button>
@@ -312,6 +363,7 @@
             <div class="rsi-result-pane" data-rsi-pane-body="findings"><div id="rsi-findings"></div></div>
             <div class="rsi-result-pane hidden" data-rsi-pane-body="controls"><div id="rsi-controls"></div></div>
             <div class="rsi-result-pane hidden" data-rsi-pane-body="surface"><div id="rsi-surface"></div></div>
+            <div class="rsi-result-pane hidden" data-rsi-pane-body="universes"><div id="rsi-universes"></div></div>
             <div class="rsi-result-pane hidden" data-rsi-pane-body="report"><div class="rsi-summary" id="rsi-report"></div></div>
             <div class="rsi-result-pane hidden" data-rsi-pane-body="toc"><div id="rsi-toc" class="rsi-table-wrap"></div></div>
             <div class="rsi-result-pane hidden" data-rsi-pane-body="lora"><div id="rsi-lora"></div></div>
