@@ -1,3 +1,13 @@
+# Release Notes — unreleased
+
+### RSI: code and people beside the policy
+* **Repository analysis** (`deepthink/nomosloop/repo.py`, `deepthink rsi --repo DIR`): code and configuration are read for 16 kinds of security defect; secrets are redacted, nothing is executed, and symlinks, VCS and dependency folders, binaries and large files are skipped
+* **Social-engineering layer** (`deepthink/nomosloop/social.py`, `--social profile.json`): a role-level profile of procedures is checked for pretexting resets, payment redirection without dual control, urgency overrides, missing reporting channels, untrained exposed roles, public exposure and untested procedures. An `authorization` block is required; personal and psychometric data is dropped and listed as not admitted
+* Facts are read against the policy (`surface.py`): *contradicts* (phase π edge), *uncovered* (π/2 to the controls modulus) or *permitted* (0). They become agents with their own heal budget; heals quote the clause and the remediation, stocks propose the remediation as a posture-gated control; reports carry a discrepancy register
+* Code and procedure facts stay with the offline lexicon unless `surface_remote_mapping` is set
+* Web UI: repository path (only under `RSI_REPO_ROOTS`) and profile fields, and a *Code & people* results tab
+* Example: `examples/security_surface/`
+
 # Release Notes — `0.4.0`
 
 **Tagline:** "Theory Synthesis: a swarm of QNNs, one body of work" · "RSI for cybersecurity on Agent Mechanics"

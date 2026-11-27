@@ -242,7 +242,35 @@ const RsiMode = (() => {
             : `<pre>${esc(report)}</pre>`;
         $('rsi-download-btn').disabled = !report;
         if (result.snapshot) renderLists(result.snapshot);
+        renderSurface(result);
         showPane((result.findings || []).length ? 'findings' : 'controls');
+    }
+
+    const SURFACE_STATUS = { contradicts: 'contradicts the policy', uncovered: 'not covered by the policy', permitted: 'permitted by the policy' };
+
+    function renderSurface(result) {
+        const box = $('rsi-surface');
+        const rows = result.discrepancies || [];
+        $('rsi-tab-surface-n').textContent = rows.length ? ` ${rows.length}` : '';
+        if (!box) return;
+        const meta = result.surface || {};
+        const head = [];
+        if (meta.code) head.push(`Repository: ${Number(meta.code.files_scanned)} files scanned, ${Number(meta.code.facts)} code facts. Secrets are redacted; nothing was executed.`);
+        if (meta.social) head.push(`Social engineering: ${Number(meta.social.roles)} roles, authorized by ${esc(meta.social.authorized_by)}${(meta.social.dropped || []).length ? ` · not admitted: ${esc(meta.social.dropped.slice(0, 8).join(', '))}` : ''}.`);
+        if (!rows.length && !head.length) {
+            box.innerHTML = '<span class="rsi-empty">Add a repository path or a social-engineering profile to read code and procedures against the policy.</span>';
+            return;
+        }
+        box.innerHTML = head.map(h => `<div class="rsi-capacity__meta">${h}</div>`).join('') + (rows.length ? rows.map(r => {
+            const refs = (r.contradicts.length ? r.contradicts : r.permitted_by).map(c => `<code>${esc(c)}</code>`).join(' ');
+            return `<div class="rsi-finding rsi-surface--${esc(r.status)}">
+                <div class="rsi-finding__head"><span class="rsi-sev" style="--sev:${Math.min(1, r.severity || 0)}">${Number(r.severity || 0).toFixed(2)}</span>
+                <b>${esc(r.ref)}</b> ${esc(r.title)}${r.count > 1 ? ` ×${Number(r.count)}` : ''} · ${esc(SURFACE_STATUS[r.status] || r.status)} ${refs}</div>
+                <div class="rsi-clash"><code>${esc(r.location)}</code></div>
+                <p>${esc(r.statement)} <b>Remediation:</b> ${esc(r.remediation)}</p>
+                ${r.evidence ? `<div class="rsi-clash"><code>${esc(r.evidence)}</code></div>` : ''}
+            </div>`;
+        }).join('') : '<span class="rsi-empty">No discrepancies found.</span>');
     }
 
     function download() {
@@ -284,6 +312,8 @@ const RsiMode = (() => {
             api_key: val('openrouter-api-key'),
             mapper_model: val('rsi-mapper-model'),
             mapper_arc_agi2: val('rsi-mapper-arc'),
+            repo_path: val('rsi-repo-path'),
+            social_profile: val('rsi-social'),
             lora: {
                 enabled: $('rsi-lora-on').checked,
                 adapter_id: Math.round(num('rsi-lora-id', 0)),

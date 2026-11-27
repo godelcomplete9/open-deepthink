@@ -574,6 +574,189 @@ def t13():
 
 chk("weight program: editor tier routing, no sampling params, pipeline wiring", t13)
 
+SURFACE = ROOT / "examples" / "security_surface"
+
+
+def t14():
+    import os
+
+    from deepthink.nomosloop import repo
+
+    res = repo.scan_repository(str(SURFACE / "repo"))
+    rules = {f.rule: f for f in res.facts}
+    for r in (
+        "hardcoded-secret",
+        "tls-verify-off",
+        "debug-on",
+        "open-ingress",
+        "public-storage",
+        "remote-desktop",
+        "sql-injection",
+        "container-root",
+    ):
+        assert r in rules, (r, sorted(rules))
+    secret = rules["hardcoded-secret"]
+    assert "demo-not-a-real-secret" not in secret.evidence and "redacted" in secret.evidence
+    assert all("demo-not-a-real-secret" not in str(f.as_dict()) for f in res.facts)
+    assert [f.ref for f in res.facts] == [f"code/C{i}" for i in range(1, len(res.facts) + 1)]
+    with tempfile.TemporaryDirectory() as d:
+        os.makedirs(os.path.join(d, "node_modules", "x"))
+        os.makedirs(os.path.join(d, ".git"))
+        Path(d, "node_modules", "x", "a.js").write_text('var password = "abcdefgh";')
+        Path(d, ".git", "config").write_text('password = "abcdefgh"')
+        Path(d, "blob.bin").write_bytes(b'\0\0password = "abcdefgh"')
+        Path(d, "big.py").write_text("x = 1\n" * 100_000)
+        Path(d, "ok.py").write_text(
+            '# password = "commented-out"\nPASSWORD = os.environ["PASSWORD"]\nkey = "${KEY}"\n'
+        )
+        empty = repo.scan_repository(d)
+        assert empty.facts == [], [f.as_dict() for f in empty.facts]
+        assert empty.files_scanned == 1, empty.meta()
+    try:
+        repo.scan_repository(str(SURFACE / "missing"))
+        raise AssertionError("missing path accepted")
+    except FileNotFoundError:
+        pass
+
+
+chk("repository analysis: planted defects found, secrets redacted, junk skipped", t14)
+
+
+def t15():
+    from deepthink.nomosloop import security, social, surface
+
+    profile = json.loads((SURFACE / "social_profile.json").read_text(encoding="utf-8"))
+    facts, meta = social.analyze(profile, ACCESS.read_text(encoding="utf-8"))
+    rules = {f.rule for f in facts}
+    assert {"pretext-reset", "payment-redirect", "urgency-bypass", "no-reporting"} <= rules, rules
+    assert "people (individuals)" in meta["dropped"], meta
+    blob = json.dumps([f.as_dict() for f in facts])
+    assert "ENFP" not in blob and "openness" not in blob and "biography" not in blob
+    # no authorization block -> refused
+    for bad in ({"roles": profile["roles"]}, {"authorization": {"by": ""}, "roles": []}):
+        try:
+            social.analyze(bad)
+            raise AssertionError("profile without authorization accepted")
+        except social.SocialProfileError:
+            pass
+    # personal fields inside a role are dropped
+    clean, dropped = social.sanitize(
+        {
+            "authorization": {"by": "x"},
+            "roles": [{"role": "help desk", "mbti": "INTJ", "name": "A"}],
+        }
+    )
+    assert clean["roles"] == [{"role": "help desk"}] and "roles[0].mbti" in dropped
+    # a strong callback procedure removes the reset finding
+    strong = json.loads(json.dumps(profile))
+    strong["roles"][0]["verification"] = ["callback to the number on file"]
+    assert "pretext-reset" not in {f.rule for f in social.analyze(strong)[0]}
+    # the rule says callback, the routine does not: a contradiction with the clause
+    policy = (
+        "ACCESS\n§1 Staff may use the VPN.\n"
+        "§2 The help desk must verify identity by a callback before any password reset.\n"
+    )
+    lat = security.parse_policy(policy, "z")
+    reset = [f for f in facts if f.rule == "pretext-reset"]
+    links = surface.link([f.as_dict() for f in reset], lat)
+    assert links[reset[0].ref]["status"] == "contradicts", links
+    assert links[reset[0].ref]["contradicts"][0]["clause"] == "pol/L2/§2", links
+    # urgency written as an allowed shortcut does not count as a rule against it
+    p2 = dict(profile, procedures=["Urgent executive requests must never skip verification."])
+    assert "urgency-bypass" not in {f.rule for f in social.analyze(p2)[0]}
+
+
+chk("social engineering: role level only, authorization required, rule vs routine", t15)
+
+
+def t16():
+    from deepthink.nomosloop import security, surface
+
+    text = ACCESS.read_text(encoding="utf-8")
+    res = run(
+        text,
+        {
+            "offline": True,
+            "drive": "leak",
+            "iterations": 2,
+            "repo_path": str(SURFACE / "repo"),
+            "social_profile": str(SURFACE / "social_profile.json"),
+        },
+    )
+    assert not res.get("error"), res.get("error")
+    assert res["surface"]["code"]["facts"] >= 8 and res["surface"]["social"]["roles"] == 3
+    status = {r["ref"]: r for r in res["discrepancies"]}
+    by_rule = {r["rule"]: r for r in res["discrepancies"]}
+    assert by_rule["remote-desktop"]["contradicts"] == ["pol/L2/§8"], by_rule["remote-desktop"]
+    assert "pol/L1/§12" in by_rule["open-ingress"]["contradicts"]
+    assert by_rule["sql-injection"]["status"] == "uncovered"
+    assert any(t["ax"].startswith("code/") for t in res["toc"])
+    assert any(t["ax"].startswith("soc/") for t in res["toc"])
+    # facts were mapped offline (no remote mapper call for code or procedures)
+    assert all(t["mapper"] == "offline-lexicon" for t in res["toc"] if t["ax"] in status)
+    hit = [f for f in res["findings"] if any(c["a1"].startswith("code/") for c in f["clashes"])]
+    assert hit, [f["clashes"] for f in res["findings"]]
+    assert "Remediation:" in hit[0]["finding"]
+    assert "## Code and configuration" in res["artifact_code"]
+    assert "## Social engineering" in res["artifact_code"]
+    assert "demo-not-a-real-secret" not in json.dumps(res, default=str)
+    # the policy's own seeded clashes still surface beside the code findings
+    seeded = {("pol/L2/§2", "pol/L2/§7"), ("pol/L2/§5", "pol/L2/§8")}
+    found = {(c["a1"], c["a2"]) for f in res["findings"] for c in f["clashes"]}
+    assert found & seeded, found
+    # without surface inputs nothing changes
+    plain = run(text, {"offline": True, "drive": "leak", "iterations": 1})
+    assert plain["discrepancies"] == [] and plain["surface"] == {}
+    assert security.parse_policy(text, "x") and surface.KINDS == ("code", "social")
+    try:
+        run(text, {"offline": True, "social_profile": {"roles": []}})
+        raise AssertionError("a profile without authorization was accepted")
+    except ValueError as e:
+        assert "authorization" in str(e), e
+
+
+chk("offline loop reads code and procedures against the policy", t16)
+
+
+def t17():
+    import importlib
+    import os
+
+    import app as app_mod
+    from deepthink.config import get_settings
+    from fastapi.testclient import TestClient
+
+    client = TestClient(app_mod.app)
+    base = {"text": ACCESS.read_text(encoding="utf-8"), "offline": True}
+    old = os.environ.pop("RSI_REPO_ROOTS", None)
+    try:
+        get_settings.cache_clear()
+        r = client.post("/start_rsi", json={**base, "repo_path": str(SURFACE / "repo")})
+        assert r.status_code == 400 and "RSI_REPO_ROOTS" in r.json()["message"], r.text
+        os.environ["RSI_REPO_ROOTS"] = str(SURFACE)
+        get_settings.cache_clear()
+        r = client.post("/start_rsi", json={**base, "repo_path": str(ROOT / "deepthink")})
+        assert r.status_code == 400 and "outside" in r.json()["message"], r.text
+        r = client.post(
+            "/start_rsi", json={**base, "repo_path": str(SURFACE / "repo" / ".." / ".." / "..")}
+        )
+        assert r.status_code == 400, r.text
+        r = client.post("/start_rsi", json={**base, "social_profile": "{not json"})
+        assert r.status_code == 400 and "JSON" in r.json()["message"], r.text
+        r = client.post("/start_rsi", json={**base, "social_profile": "[1, 2]"})
+        assert r.status_code == 400, r.text
+        assert app_mod._rsi_repo_path(str(SURFACE / "repo")).endswith("repo")
+    finally:
+        if old is None:
+            os.environ.pop("RSI_REPO_ROOTS", None)
+        else:
+            os.environ["RSI_REPO_ROOTS"] = old
+        get_settings.cache_clear()
+        importlib.invalidate_caches()
+
+
+chk("API: repository scans only under RSI_REPO_ROOTS; profile must be a JSON object", t17)
+
 
 ok = sum(1 for _, s, _ in results if s == "OK")
 total = len(results)

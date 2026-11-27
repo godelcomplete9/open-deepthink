@@ -212,7 +212,7 @@ asyncio.run(main())
 
 It runs on **Agent Mechanics**, a formal theory of agents as conductors of eight species of information ([the treatise](./docs/Agent_Mechanics_Treatise_EN.pdf)). It also uses **NX-1**, a nomenclature complement written for this engine ([`docs/NOMENCLATURE_COMPLEMENT.md`](./docs/NOMENCLATURE_COMPLEMENT.md)).
 
-> RSI reasons over the **text** of your policies, runbooks and standards. It does not scan networks, test systems or certify anything. Its findings are leads for a human reviewer, and its posture score is bookkeeping over the text. Nothing here has been validated against real incidents.
+> RSI reads three kinds of artifact: the **text** of your policies, runbooks and standards; the **code and configuration** of a repository; and a **role-level profile** of the procedures people run, for social engineering. It never executes code, probes a network, contacts or tests a person, or certifies anything. Its findings are leads for a human reviewer, and its posture score is bookkeeping over the policy text. Nothing here has been validated against real incidents.
 
 ### What a run gives you
 
@@ -280,6 +280,26 @@ The editor is opt-in and has its own tier. It never falls back to the local driv
 
 **8. Space and time.** A covered cell is a (clause, function) pair held by a stable, active agent. The benchmark reports cells covered, reasoning rounds per solve, findings, controls and ensemble Leak for each drive. Faster loops and shorter thinking both widen coverage per unit of time. Coverage means an agent stands for that function. It does not mean the function is secure.
 
+### Beyond the policy: code and people
+
+A written rule can be contradicted by what actually runs, or by how people carry it out. Two optional inputs bring those artifacts into the loop. Each observation becomes a **fact**, and each fact is read against the policy clauses on the same topic:
+
+| Status | Meaning | In the lattice |
+|---|---|---|
+| **contradicts** | a clause forbids or requires the opposite | edge with phase π to that clause, so it clashes like two contradictory clauses |
+| **uncovered** | the policy says nothing about it | edge with phase π/2 to the controls modulus |
+| **permitted** | a clause allows it | edge with phase 0 |
+
+Every fact becomes an agent beside the policy's own (`AX:code/C…`, `AX:soc/S…`). A leaking fact agent heals into a finding that quotes the clause it breaks and the concrete remediation. A stocking one proposes that remediation as a new control, which the posture gate keeps or rolls back like any other. Fact agents have their own heal budget, so they never crowd out the policy's internal clashes. Every report also carries a deterministic **discrepancy register** of all facts.
+
+**Repository analysis** (`--repo DIR`, `params["repo_path"]`, [`repo.py`](./deepthink/nomosloop/repo.py)) reads code and configuration for: hard-coded credentials, private keys, TLS verification turned off, debug mode, inbound rules open to the internet, services on every interface, public storage, remote desktop switched on, SQL or shell commands built from strings, weak hashes, containers running as root, world-writable permissions, wildcard CORS, authentication or CSRF checks disabled, and logging turned off. Files are only read. Symbolic links, VCS and dependency folders, binaries and files over 400 KB are skipped, and secret values are redacted before they reach a fact, a prompt or the report.
+
+**Social engineering** (`--social profile.json`, `params["social_profile"]`, [`social.py`](./deepthink/nomosloop/social.py)) reads a role-level profile: for each role, its contact channels, what it can do, how it verifies a requester, how many approvals it needs, whether it is publicly listed and whether it is trained. It finds account resets on weak verification (pretexting), payment or bank-detail changes without dual control (business e-mail compromise), no written rule against urgency or authority overrides, no channel to report a suspicious contact, exposed roles without training, publicly reachable privileged roles, and procedures that are never exercised. A policy that demands a callback while the help desk resets passwords on an employee number is reported as a contradiction between the rule and the routine.
+
+The profile needs an `authorization` block naming who authorized the assessment and its scope. Only role-level fields are admitted: names, contact details, biographies, personality data (Big Five, MBTI), behavioural reports and lists of individuals are dropped before analysis and listed in the report as not admitted. The layer finds weak procedures; it does not profile people or write pretexts and lures. See [`examples/security_surface/`](./examples/security_surface/).
+
+Code and procedure facts are mapped with the offline lexicon (plus the species each detector assigns) unless you pass `surface_remote_mapping`, so repository content and role descriptions do not reach a remote mapper by default. In the web UI, a repository path is accepted only under the folders listed in `RSI_REPO_ROOTS` on the server; the CLI reads any local path you give it.
+
 ### Drives and sensitivity
 
 | Drive | Intent | `S_min` | `ζ` | heals/loop | controls/loop | `θ` |
@@ -326,6 +346,9 @@ Findings, controls, the hardened policy, the correspondences, the LoRA history a
 
 ```bash
 deepthink rsi --input examples/security/institution_access_policy.txt --drive leak --iterations 3 --offline
+deepthink rsi --input examples/security/institution_access_policy.txt \
+              --repo examples/security_surface/repo \
+              --social examples/security_surface/social_profile.json --offline   # code + people
 deepthink rsi --input my_policy.md --drive stock --objective "protect finance data" \
               --driver-url http://localhost:8080/v1 --lora      # local driver, LoRA clamp
 deepthink rsi --input my_policy.md --driver-url http://localhost:8080/v1 --lora               --lora-program --editor-model <router-id> --lora-adapters 0,1   # weight-space programming
@@ -368,9 +391,9 @@ Leak-driven runs produce the most findings and the lowest ensemble Leak. Stock-d
 
 ### What is measured and what is not
 
-- **Measured:** contradictions found by the parser, posture before and after, conservation of the tick law, gauge invariance, which controls pass the gate, rounds per solve, and the LoRA keep/rollback decisions.
+- **Measured:** contradictions found by the parser, code and procedure facts and their status against the policy, posture before and after, conservation of the tick law, gauge invariance, which controls pass the gate, rounds per solve, and the LoRA keep/rollback decisions.
 - **Readings, not measurements:** the mapping of clauses to species, the climate field of names, and every treatise parameter.
-- **Not claimed:** that a higher posture means a safer institution, that findings are complete, or that the LoRA adapter improves your model. Whether a trained adapter helps is for you to evaluate on your own traces.
+- **Not claimed:** that a higher posture means a safer institution, that findings are complete (repository analysis is pattern based and misses what its detectors do not describe; the social layer only sees what the profile states), or that the LoRA adapter improves your model. Whether a trained adapter helps is for you to evaluate on your own traces.
 
 ---
 

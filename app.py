@@ -1953,6 +1953,45 @@ def _build_rsi_models(payload: dict):
     return driver, mapper
 
 
+def _rsi_repo_path(value) -> str:
+    """A repository path the server may scan: only under RSI_REPO_ROOTS (empty disables it)."""
+    path = str(value or "").strip()
+    if not path:
+        return ""
+    roots = [r for r in (get_settings().rsi_repo_roots or "").split(os.pathsep) if r.strip()]
+    if not roots:
+        raise ValueError(
+            "Repository analysis from the web UI is off. Set RSI_REPO_ROOTS on the server "
+            "to the folders it may read, or use `deepthink rsi --repo`."
+        )
+    real = os.path.realpath(path)
+    for root in roots:
+        base = os.path.realpath(root.strip())
+        if os.path.commonpath([real, base]) == base:
+            if not os.path.exists(real):
+                raise ValueError("Repository path does not exist on the server.")
+            return real
+    raise ValueError("Repository path is outside RSI_REPO_ROOTS.")
+
+
+def _rsi_social_profile(value):
+    """A role-level profile object (or JSON text), size-capped; validated by the engine."""
+    if value in (None, "", {}):
+        return None
+    if isinstance(value, str):
+        if len(value) > 100_000:
+            raise ValueError("Social profile too large.")
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Social profile is not valid JSON: {e.msg}.") from e
+    if not isinstance(value, dict):
+        raise ValueError("Social profile must be a JSON object.")
+    if len(json.dumps(value)) > 100_000:
+        raise ValueError("Social profile too large.")
+    return value
+
+
 @app.get("/rsi_examples")
 async def rsi_examples():
     """Bundled security policies the RSI tab can load."""
@@ -2028,6 +2067,11 @@ async def start_rsi(payload: dict = Body(...)):
     title = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(payload.get("law_title") or "policy"))[:60]
     offline = bool(payload.get("offline", False))
     objective = str(payload.get("objective") or "")[:400]
+    try:
+        repo_path = _rsi_repo_path(payload.get("repo_path"))
+        social_profile = _rsi_social_profile(payload.get("social_profile"))
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"message": str(e)})
 
     try:
         driver, mapper = _build_rsi_models(payload)
@@ -2066,6 +2110,8 @@ async def start_rsi(payload: dict = Body(...)):
                     "objective": objective,
                     "mapper_arc_agi2": arc,
                     "lora": lora,
+                    "repo_path": repo_path,
+                    "social_profile": social_profile,
                 },
                 log=_log,
                 on_event=_on_event,

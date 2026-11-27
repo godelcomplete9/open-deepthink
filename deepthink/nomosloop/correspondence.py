@@ -296,7 +296,7 @@ def contradiction(a: str, b: str) -> float:
 @dataclass
 class AXNode:
     ref: str
-    kind: str  # law | level | rule | modulus | operation | code
+    kind: str  # law | level | rule | modulus | operation | code | social
     text: str
     attrs: dict[str, Any] = field(default_factory=dict)
 
@@ -409,10 +409,16 @@ KIND_PRIOR: dict[str, dict[str, float]] = {
 
 
 def offline_row(node: AXNode) -> dict[str, Any]:
-    p, ev = project_text(node.text, KIND_PRIOR.get(node.kind))
+    prior = dict(KIND_PRIOR.get(node.kind) or {})
+    sp = node.attrs.get("species")
+    if sp in SPECIES:  # code and social facts carry the function they touch
+        prior[sp] = prior.get(sp, 0.0) + 2.0
+    p, ev = project_text(node.text, prior)
     top = sorted(range(8), key=lambda i: -p[i])[:3]
     basis = [VERBS[SPECIES[i]] for i in top if p[i] > 0.05]
     why = {
+        "code": "what actually runs; a discrepancy with a clause is a leak in practice",
+        "social": "a procedure run by people; a gap is a social-engineering path",
         "modulus": "closes a scale; energy only by traversal of its rules",
         "rule": "a clause entrusted by the institution; pattern without own intake",
         "operation": "a viable control operation; prosthesis energised by its licensing agent",

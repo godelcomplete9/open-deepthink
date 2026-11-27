@@ -8,7 +8,7 @@ Usage::
     deepthink theory --prompt "…" [--swarm 5] [--domain olympiad] [--debug]
     deepthink qnn  --prompt "…" [--debug]
     deepthink qdad --prompt "…" [--debug]
-    deepthink rsi  --input policy.txt [--drive leak|stock|bal] [--offline]
+    deepthink rsi  --input policy.txt [--repo DIR] [--social profile.json] [--drive leak|stock|bal] [--offline]
     deepthink version
 """
 
@@ -352,6 +352,12 @@ def cmd_rsi(args: argparse.Namespace) -> int:
         params["mutators"] = args.mutators
     if args.mapper_arc_agi2 is not None:
         params["mapper_arc_agi2"] = args.mapper_arc_agi2
+    if args.repo:
+        params["repo_path"] = args.repo
+    if args.social:
+        params["social_profile"] = args.social
+    if args.surface_remote_mapping:
+        params["surface_remote_mapping"] = True
     if args.lora or args.lora_program:
         params["lora"] = {
             "enabled": bool(args.lora),
@@ -579,6 +585,21 @@ def build_parser() -> argparse.ArgumentParser:
         "--input", "-i", required=True, help="Security policy, runbook or standard (.txt/.md)"
     )
     p_rsi.add_argument("--title", default="policy", help="Policy title")
+    p_rsi.add_argument(
+        "--repo",
+        default=None,
+        help="Local repository (or file) whose code and configuration are read against the policy",
+    )
+    p_rsi.add_argument(
+        "--social",
+        default=None,
+        help="Role-level social-engineering profile (.json, needs an 'authorization' block)",
+    )
+    p_rsi.add_argument(
+        "--surface-remote-mapping",
+        action="store_true",
+        help="Also send code and social facts to the remote mapper (default: offline lexicon)",
+    )
     p_rsi.add_argument(
         "--iterations", type=int, default=None, help="Loops (correspond, tick, heal, stock, lora)"
     )

@@ -339,6 +339,8 @@
 /* ── results ── */
 .rsi-finding, .rsi-control { padding: 0.75rem 0.9rem; margin-bottom: 0.55rem; border-radius: var(--app-radius-sm); border: 1px solid var(--app-glass-border); background: rgba(255, 255, 255, 0.02); }
 .rsi-finding { border-left: 2px solid rgba(239, 68, 68, 0.55); }
+.rsi-finding.rsi-surface--uncovered { border-left-color: rgba(245, 158, 11, 0.6); }
+.rsi-finding.rsi-surface--permitted { border-left-color: rgba(148, 163, 184, 0.5); }
 .rsi-control { border-left: 2px solid rgba(52, 211, 153, 0.55); }
 .rsi-finding p, .rsi-control p { margin: 0.35rem 0 0.25rem; font-size: 0.85rem; color: var(--app-text-secondary); }
 .rsi-finding__head { font-size: 0.78rem; color: var(--app-text-muted); display: flex; gap: 0.45rem; align-items: center; flex-wrap: wrap; }
