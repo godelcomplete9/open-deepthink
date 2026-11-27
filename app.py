@@ -66,7 +66,7 @@ from deepthink.self_attention import compute_self_attention
 from deepthink.sessions import SessionStore
 from deepthink.state import GraphState
 from deepthink.theory import clamp_theory_params, run_theory_pipeline
-from deepthink.utils import clean_and_parse_json, execute_code_in_sandbox
+from deepthink.utils import clean_and_parse_json, execute_code_in_sandbox, strip_secrets
 from dotenv import load_dotenv
 from fastapi import Body, FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
@@ -177,6 +177,7 @@ final_reports = {}
 
 
 active_distillation_graph = None
+distillation_task: "asyncio.Task | None" = None
 
 
 set_log_queue(log_stream)
@@ -636,7 +637,7 @@ async def build_and_run_graph(payload: dict = Body(...)):
             "session_id": session_id,
             "mode": "app_slot_machine",
             "original_request": user_prompt,
-            "params": params,
+            "params": strip_secrets(params),
             "final_solution": None,
             "qdad_matrices": {},
             "all_rag_documents": [],
@@ -785,7 +786,7 @@ async def build_and_run_graph(payload: dict = Body(...)):
             "session_id": session_id,
             "mode": "brainstorm",
             "original_request": user_prompt,
-            "params": params,
+            "params": strip_secrets(params),
             "final_solution": None,
             "all_rag_documents": [],
             "all_layers_prompts": [],
@@ -855,6 +856,8 @@ async def export_qnn(session_id: str):
     state_to_export.pop("summarizer_llm", None)
     state_to_export.pop("embeddings_model", None)
     state_to_export.pop("raptor_index", None)
+    if "params" in state_to_export:
+        state_to_export["params"] = strip_secrets(state_to_export["params"])
 
     rag_docs = state_to_export.get("all_rag_documents") or []
     serialized_docs = []
@@ -907,6 +910,9 @@ async def import_qnn(file: UploadFile = File(...)):
             else:
                 restored.append(document)
         imported_state["all_rag_documents"] = restored
+        # Files exported by older versions can carry credentials.
+        if "params" in imported_state:
+            imported_state["params"] = strip_secrets(imported_state["params"])
 
         sessions[session_id] = imported_state
         await log_stream.put(
@@ -1618,9 +1624,26 @@ async def download_report(session_id: str):
     )
 
 
+def _distillation_busy() -> JSONResponse | None:
+    """A 409 response while a distillation run is active, else None."""
+    if distillation_task is None or distillation_task.done():
+        return None
+    return JSONResponse(
+        content={
+            "message": "A distillation run is already active. Stop it, or wait for its "
+            "current epoch to finish, before starting another."
+        },
+        status_code=409,
+    )
+
+
 @app.post("/start_distillation")
 async def start_distillation(payload: dict = Body(...)):
-    global active_distillation_graph
+    global distillation_task
+
+    busy = _distillation_busy()
+    if busy:
+        return busy
 
     topics_str = payload.get("topics", "")
     topics_list = [t.strip() for t in topics_str.split(",") if t.strip()]
@@ -1650,7 +1673,8 @@ async def start_distillation(payload: dict = Body(...)):
             # For distillation, use synthesis_model as override if provided, else main model
             distil_model = (
                 payload.get("synthesis_model", "").strip()
-                or payload.get("openrouter_model", "stepfun/step-3.5-flash:free")
+                or payload.get("openrouter_model")
+                or get_settings().openrouter_model
                 if provider == "openrouter"
                 else payload.get("llamacpp_model", "llama-3.2-1b-instruct")
             )
@@ -1690,7 +1714,13 @@ async def start_distillation(payload: dict = Body(...)):
         await log_stream.put(f"Distillation LLM Init Error: {e}")
         return JSONResponse(content={"message": f"Failed to initialize LLM: {e}"}, status_code=500)
 
-    asyncio.create_task(run_distillation_loop(llm, topics_list, anchors, debug_mode))
+    # Check again with no await before create_task, so two requests cannot both start.
+    busy = _distillation_busy()
+    if busy:
+        return busy
+    distillation_task = asyncio.create_task(
+        run_distillation_loop(llm, topics_list, anchors, debug_mode)
+    )
 
     return {
         "status": "started",
@@ -1705,6 +1735,7 @@ async def run_distillation_loop(llm, topics, anchors, debug_mode):
     total_qa_pairs = 0
     all_dataset_paths = []
     cumulative_step = 0
+    run_error = ""
 
     for i, anchor in enumerate(anchors):
         question = anchor.get("question")
@@ -1755,8 +1786,10 @@ async def run_distillation_loop(llm, topics, anchors, debug_mode):
                 if not should_continue:
                     total_qa_pairs += len(active_distillation_graph.distilled_data)
                     all_dataset_paths.append(active_distillation_graph.dataset_path)
+                    run_error = active_distillation_graph.error
+                    outcome = "Failed" if run_error else "Complete"
                     await log_stream.put(
-                        f"--- ⚗️ Anchor {i + 1} Complete. Total QA so far: {total_qa_pairs} ---"
+                        f"--- ⚗️ Anchor {i + 1} {outcome}. Total QA so far: {total_qa_pairs} ---"
                     )
                     break
 
@@ -1766,6 +1799,11 @@ async def run_distillation_loop(llm, topics, anchors, debug_mode):
 
                 await log_stream.put(traceback.format_exc())
                 break
+
+        if run_error:
+            # The next anchor would hit the same dead provider.
+            await log_stream.put(f"Distillation Error: {run_error}")
+            break
 
         if not active_distillation_graph.is_running:
             await log_stream.put("--- ⚗️ Distillation halted by user. ---")
@@ -1777,6 +1815,7 @@ async def run_distillation_loop(llm, topics, anchors, debug_mode):
                 "type": "distillation_complete",
                 "total_qa_pairs_count": total_qa_pairs,
                 "dataset_files": all_dataset_paths,
+                "error": run_error,
             }
         )
     )

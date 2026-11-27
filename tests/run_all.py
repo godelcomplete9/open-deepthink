@@ -46,6 +46,7 @@ PHASE_FILES = [
     "phase_self_attention.py",
     "phase_rsi.py",
     "phase_theory.py",
+    "phase_regressions.py",
     "phase_config.py",
     "phase_package_api.py",
     "phase_honesty.py",

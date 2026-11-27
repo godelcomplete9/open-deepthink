@@ -137,7 +137,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("OPENROUTER_BASE_URL", "openrouter_base_url"),
     )
     openrouter_model: str = Field(
-        default="stepfun/step-3.5-flash:free",
+        default="nvidia/nemotron-3-ultra-550b-a55b:free",
         validation_alias=AliasChoices("OPENROUTER_MODEL", "openrouter_model"),
     )
     openrouter_embedding_model: str = Field(

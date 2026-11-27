@@ -66,7 +66,7 @@ from deepthink.theory.consensus import (
 )
 from deepthink.theory.domains import domain_profile, guess_answer_type, resolve_domain
 from deepthink.theory.ledger import TheoryLedger, tokens
-from deepthink.utils import clean_and_parse_json
+from deepthink.utils import clean_and_parse_json, strip_secrets
 
 LogFn = Callable[[str], Any] | None
 EventFn = Callable[[dict[str, Any]], Any] | None
@@ -164,11 +164,8 @@ def clamp_theory_params(params: dict[str, Any] | None) -> dict[str, Any]:
     for alias, key in aliases.items():
         if alias in raw and key not in raw:
             raw[key] = raw[alias]
-    p = {**default_theory_params(), **raw}
     # Request params from the web UI carry credentials; they never belong in a run record.
-    for key in list(p):
-        if any(t in key.lower() for t in ("api_key", "apikey", "token", "secret", "password")):
-            p.pop(key)
+    p = strip_secrets({**default_theory_params(), **raw})
     for key, (lo, hi) in _INT_LIMITS.items():
         p[key] = int(max(lo, min(hi, int(_num(p.get(key), default_theory_params()[key] or 0)))))
     for key, (flo, fhi) in _FLOAT_LIMITS.items():

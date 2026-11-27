@@ -30,7 +30,7 @@ from deepthink.chains.brainstorm_chains import (
     get_problem_summarizer_chain,
 )
 from deepthink.self_attention import compute_self_attention
-from deepthink.utils import clean_and_parse_json
+from deepthink.utils import clean_and_parse_json, strip_secrets
 
 LogFn = Callable[[str], Any] | None
 
@@ -293,7 +293,8 @@ async def run_qnn_pipeline(
         ``QNNResult.to_dict()`` shape; primary text in
         ``proposed_solution`` / ``final_solution``.
     """
-    p = {**default_qnn_params(), **(params or {})}
+    # ``p`` is logged and returned with the result, so it must not carry credentials.
+    p = strip_secrets({**default_qnn_params(), **(params or {})})
     synth = synthesis_llm or llm
     chat_history = chat_history or []
 

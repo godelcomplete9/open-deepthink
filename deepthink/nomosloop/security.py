@@ -25,6 +25,7 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
+from collections.abc import Callable
 from typing import Any
 
 from . import correspondence as tc
@@ -146,9 +147,50 @@ _CLAUSE = re.compile(
 )
 _HEADER = re.compile(r"^\s*(#{1,6}\s+.+|[A-Z][A-Z0-9 &/,\-]{3,}:?)\s*$")
 
+# Identifiers written without list punctuation: "1.1 x", "A.5.1 x", "AC-2(1) x", "Section 3: x".
+# The text must start like a sentence, so wrapped prose ("1.2 or higher") is not split, and a
+# style counts only when the policy uses it at least twice.
+_ID_END = r"(?:\s*[:.)]\s+|\s+[—–-]\s+|\s+)(?=[A-Z\"'“‘(\[])(.*)$"
+_ID_STYLES = {
+    name: re.compile(rf"^\s*{ident}{_ID_END}")
+    for name, ident in (
+        ("dotted", r"(\d+(?:\.\d+)+)"),
+        ("lettered", r"([A-Z]{1,3}(?:\.\d+)+)"),
+        ("control", r"([A-Z]{2,5}-\d+(?:\.\d+)*(?:\(\d+\))?)"),
+        ("section", r"(?:Section|SECTION|Article|ARTICLE|Clause|CLAUSE)\s+(\d+(?:\.\d+)*)"),
+    )
+}
+
+
+def _clause_matcher(lines: list[str]) -> Callable[[str], tuple[str, str, str] | None]:
+    """A line -> (style, id, text) matcher for the numbering styles this policy uses.
+
+    The id is empty for bullets and "(a)" items, which are numbered automatically.
+    """
+    styles = [
+        (name, rx) for name, rx in _ID_STYLES.items() if sum(bool(rx.match(x)) for x in lines) > 1
+    ]
+
+    def match(line: str) -> tuple[str, str, str] | None:
+        m = _CLAUSE.match(line)
+        if m:
+            tag = m.group(1).replace("§", "").strip().rstrip(".)")
+            return "list", tag if re.match(r"^\d", tag) else "", m.group(2)
+        for name, rx in styles:
+            m = rx.match(line)
+            if m:
+                return name, m.group(1), m.group(2)
+        return None
+
+    return match
+
 
 def parse_clauses(text: str) -> list[dict[str, str]]:
-    """Split a policy into clauses: numbered (§2, 2., 2.1)), bulleted, or paragraphs."""
+    """Split a policy into clauses.
+
+    Recognizes numbered clauses (§2, 2., 2.1), 2.1, A.2, AC-2, "Section 2:"), bullets, and
+    paragraphs. A short "Section N: Title" line above other numbering is a section heading.
+    """
     clauses: list[dict[str, str]] = []
     section = ""
     cur: dict[str, str] | None = None
@@ -162,25 +204,30 @@ def parse_clauses(text: str) -> list[dict[str, str]]:
         cur = None
 
     lines = text.splitlines()
+    match = _clause_matcher(lines)
     first = next((i for i, ln in enumerate(lines) if ln.strip()), None)
     if first is not None:
-        if re.match(r"^\s*[A-Z][A-Z0-9 &/,\-]{6,}", lines[first]) and not _CLAUSE.match(
-            lines[first]
-        ):
+        if re.match(r"^\s*[A-Z][A-Z0-9 &/,\-]{6,}", lines[first]) and not match(lines[first]):
             lines = lines[first + 1 :]  # a document title, not a clause
-    for raw in lines:
+    for i, raw in enumerate(lines):
         line = raw.rstrip()
         if not line.strip():
             flush()
             continue
-        m = _CLAUSE.match(line)
+        m = match(line)
         if m:
             flush()
-            tag = m.group(1).replace("§", "").strip().rstrip(".)")
-            if not re.match(r"^\d", tag):
+            style, tag, body = m
+            if style == "section" and len(body.split()) <= 8 and body[-1:] not in ".;:!?":
+                following = next((x for x in lines[i + 1 :] if x.strip()), "")
+                below = match(following)
+                if below and below[0] != "section":
+                    section = body.strip()
+                    continue
+            if not tag:
                 auto += 1
                 tag = f"c{auto}"
-            cur = {"num": tag, "text": m.group(2), "section": section}
+            cur = {"num": tag, "text": body, "section": section}
             continue
         if _HEADER.match(line) and len(line) < 80:
             flush()

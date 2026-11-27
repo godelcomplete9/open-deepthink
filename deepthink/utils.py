@@ -14,6 +14,23 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+# Names of fields that hold credentials. "max_tokens" and "token_budget" do not match.
+_SECRET_NAME = re.compile(
+    r"api[_-]?key|secret|passw(?:or)?d|authorization|credential|(?:^|[_-])token$", re.I
+)
+
+
+def strip_secrets(value: Any) -> Any:
+    """A copy of ``value`` without credential fields, at any depth.
+
+    Apply before run parameters are stored, logged, exported or returned.
+    """
+    if isinstance(value, dict):
+        return {k: strip_secrets(v) for k, v in value.items() if not _SECRET_NAME.search(str(k))}
+    if isinstance(value, (list, tuple)):
+        return [strip_secrets(v) for v in value]
+    return value
+
 
 def clean_and_parse_json(llm_output_string):
     """

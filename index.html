@@ -33,7 +33,7 @@
                 <label for="openrouter-api-key">🔗 API Key</label>
                 <input type="password" id="openrouter-api-key" placeholder="OpenRouter API key...">
                 <label for="openrouter-model">📦 Model</label>
-                <input type="text" id="openrouter-model" value="stepfun/step-3.5-flash:free" placeholder="model-name">
+                <input type="text" id="openrouter-model" value="nvidia/nemotron-3-ultra-550b-a55b:free" placeholder="model-name">
             </div>
 
             <div id="llamacpp-config" class="provider-config">
@@ -962,7 +962,9 @@
 
                     if (!resp.ok) {
                         const errData = await resp.json();
-                        throw new Error(errData.message || 'Server error');
+                        const error = new Error(errData.message || 'Server error');
+                        error.runActive = resp.status === 409;
+                        throw error;
                     }
 
                 } catch (e) {
@@ -970,7 +972,8 @@
                     alert("Error starting distillation: " + e.message);
                     startBtn.disabled = false;
                     startBtn.textContent = "Start Distillation";
-                    toggleHidden(stopBtn, false);
+                    // Keep Stop available when another run is what blocked this one.
+                    toggleHidden(stopBtn, Boolean(e.runActive));
                 }
             });
         }
@@ -1447,6 +1450,10 @@
         // Load settings from localStorage on page load
         const savedProvider = localStorage.getItem('llm_provider') || 'openrouter';
         const savedOpenrouterApiKey = localStorage.getItem('openrouter_api_key');
+        // Forget a saved model that OpenRouter has retired, so the current default applies.
+        if (localStorage.getItem('openrouter_model') === 'stepfun/step-3.5-flash:free') {
+            localStorage.removeItem('openrouter_model');
+        }
         const savedOpenrouterModel = localStorage.getItem('openrouter_model');
         const savedLlamacppUrl = localStorage.getItem('llamacpp_url');
         const savedLlamacppEmbeddingUrl = localStorage.getItem('llamacpp_embedding_url');
@@ -1584,7 +1591,7 @@
                 onSend: async (message, chat) => {
                     const provider = localStorage.getItem('llm_provider') || 'openrouter';
                     const openrouterApiKey = localStorage.getItem('openrouter_api_key');
-                    const openrouterModel = localStorage.getItem('openrouter_model') || 'stepfun/step-3.5-flash:free';
+                    const openrouterModel = localStorage.getItem('openrouter_model') || 'nvidia/nemotron-3-ultra-550b-a55b:free';
                     const llamacppUrl = localStorage.getItem('llamacpp_url') || 'http://localhost:8080/v1';
                     const llamacppApiKey = 'no-key-required';
                     const llamacppEmbeddingUrl = localStorage.getItem('llamacpp_embedding_url') || 'http://localhost:8080/v1';
@@ -1799,7 +1806,7 @@
                 onSend: async (message, chat) => {
                     const provider = localStorage.getItem('llm_provider') || 'openrouter';
                     const openrouterApiKey = localStorage.getItem('openrouter_api_key');
-                    const openrouterModel = localStorage.getItem('openrouter_model') || 'stepfun/step-3.5-flash:free';
+                    const openrouterModel = localStorage.getItem('openrouter_model') || 'nvidia/nemotron-3-ultra-550b-a55b:free';
                     const llamacppUrl = localStorage.getItem('llamacpp_url') || 'http://localhost:8080/v1';
                     const llamacppApiKey = 'no-key-required';
                     const llamacppEmbeddingUrl = localStorage.getItem('llamacpp_embedding_url') || 'http://localhost:8080/v1';
@@ -2289,7 +2296,11 @@
                         }
                     }
                     if (data.type === 'distillation_complete') {
-                        appendDistilConsole(`✓ COMPLETE — Total QA Pairs: ${data.total_qa_pairs_count}`, APP_COLORS.success);
+                        if (data.error) {
+                            appendDistilConsole(`✗ FAILED — ${data.error}`, APP_COLORS.error);
+                        } else {
+                            appendDistilConsole(`✓ COMPLETE — Total QA Pairs: ${data.total_qa_pairs_count}`, APP_COLORS.success);
+                        }
                         // Reset distillation buttons
                         const distilStartBtn = document.getElementById('start-distillation-btn');
                         const distilStopBtn = document.getElementById('stop-distillation-btn');
