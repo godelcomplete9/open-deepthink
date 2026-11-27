@@ -22,7 +22,7 @@ services:
       PORT: "8000"
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       DEFAULT_PROVIDER: ${DEFAULT_PROVIDER:-openrouter}
-      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-stepfun/step-3.5-flash:free}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-nvidia/nemotron-3-ultra-550b-a55b:free}
       LLAMACPP_BASE_URL: ${LLAMACPP_BASE_URL:-http://host.docker.internal:8080/v1}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       DISTILLATION_OUTPUT_DIR: /app/distillation_output

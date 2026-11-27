@@ -84,6 +84,8 @@ class DistillationGraph:
     """
 
     CONTEXT_MEMORY_MAX_CHARS = 400_000  # ~100k tokens at ~4 chars/token
+    # Failed calls use no token budget, so a dead provider needs its own stop condition.
+    MAX_STALLED_EPOCHS = 3
 
     def __init__(
         self,
@@ -114,6 +116,8 @@ class DistillationGraph:
         self.log_queue = log_queue if log_queue is not None else asyncio.Queue()
         self.final_answer = ""
         self.last_perplexity = 0.0
+        self.stalled_epochs = 0  # consecutive epochs without a single agent answer
+        self.error = ""  # why the run gave up; empty for a normal or user-requested stop
 
         # Real-time output file
         self.output_dir = output_dir
@@ -175,6 +179,15 @@ class DistillationGraph:
         if len(text) > self.CONTEXT_MEMORY_MAX_CHARS:
             return text[-self.CONTEXT_MEMORY_MAX_CHARS :]
         return text
+
+    @staticmethod
+    def _string_list(value, fallback: list[str]) -> list[str]:
+        """A model-supplied list of names, or ``fallback`` if it has no usable text."""
+        if isinstance(value, str):
+            value = value.split(",")
+        if not isinstance(value, list):
+            return fallback
+        return [v.strip() for v in value if isinstance(v, str) and v.strip()] or fallback
 
     def _flat_agents(self) -> list[DistillationAgent]:
         return [a for layer in self.layers for a in layer]
@@ -269,7 +282,8 @@ class DistillationGraph:
     async def run_epoch(self) -> bool:
         """
         Run a single epoch: TaskMaster → ForwardPass → MirrorDescent → SeedCreator.
-        Returns True if should continue, False if budget exhausted or stopped.
+        Returns True if should continue, False if budget exhausted, stopped, or stalled
+        (``error`` is set after ``MAX_STALLED_EPOCHS`` epochs with no agent answer).
         """
         if not self.is_running:
             await self.log("Distillation stopped by user.")
@@ -287,7 +301,23 @@ class DistillationGraph:
         await self._step_assign_questions(flat_agents)
 
         # ── STEP 2: Feed-Forward Pass ──
-        await self._step_forward_pass()
+        if not await self._step_forward_pass():
+            # Nothing to evaluate or evolve from; skip the remaining calls.
+            self.stalled_epochs += 1
+            self._write_dataset_to_file()  # dataset_path must exist after any epoch
+            await self.log(
+                f"Epoch {self.epochs_run} produced no agent answers "
+                f"({self.stalled_epochs}/{self.MAX_STALLED_EPOCHS})."
+            )
+            if self.stalled_epochs >= self.MAX_STALLED_EPOCHS:
+                self.error = (
+                    f"No agent answered in {self.stalled_epochs} consecutive epochs. "
+                    "Check the model name, API key and rate limits."
+                )
+                await self.log(f"✗ Distillation stopped: {self.error}")
+                return False
+            return self.is_running
+        self.stalled_epochs = 0
 
         # ── STEP 3: Mirror Descent ──
         await self._step_mirror_descent(flat_agents)
@@ -369,20 +399,24 @@ class DistillationGraph:
     # STEP 2: FEED-FORWARD PASS
     # ------------------------------------------------------------------
 
-    async def _step_forward_pass(self):
+    async def _step_forward_pass(self) -> int:
         """
         Process agents layer by layer. Each layer receives the output of the
         previous layer as context. Each agent processes its own sub-question
         within the global anchor as grand objective.
+
+        Returns the number of agents that gave a non-empty answer.
         """
         await self.log("▶ Feed-Forward Pass...")
         previous_layer_output = ""
+        answered = 0
 
         for layer_idx, layer in enumerate(self.layers):
             tasks = [self._process_agent(agent, previous_layer_output) for agent in layer]
             results = await asyncio.gather(*tasks)
 
             layer_text = [r for r in results if r]
+            answered += sum(1 for r in layer_text if str(r).strip())
             previous_layer_output = "\n---\n".join(layer_text)
 
             # Trim if extremely long (keep it manageable for next layer)
@@ -390,6 +424,8 @@ class DistillationGraph:
                 previous_layer_output = previous_layer_output[-80_000:]
 
             await self.log(f"  Layer {layer_idx} ({len(layer)} agents) complete.")
+
+        return answered
 
     async def _process_agent(self, agent: DistillationAgent, layer_context: str) -> str:
         """
@@ -571,16 +607,20 @@ Be thorough and analytical.
         old_context = agent.context_memory
         agent.inherited_from = agent.id + f"_epoch{self.epochs_run}"
 
+        new_prompt = mix_result.get("new_system_prompt")
+        if not isinstance(new_prompt, str) or not new_prompt.strip():
+            new_prompt = agent.system_prompt
+
         # Log the evolution
         old_prompt_snippet = agent.system_prompt[:50]
-        new_prompt_snippet = mix_result.get("new_system_prompt", agent.system_prompt)[:50]
+        new_prompt_snippet = new_prompt[:50]
         await self.log(
             f"DISTILLATION_LOG: 🔄 Evolution: Prompt morphed from '{old_prompt_snippet}...' to '{new_prompt_snippet}...'"
         )
 
-        agent.system_prompt = mix_result.get("new_system_prompt", agent.system_prompt)
-        agent.attributes = mix_result.get("new_attributes", agent.attributes)
-        agent.skills = mix_result.get("new_skills", agent.skills)
+        agent.system_prompt = new_prompt
+        agent.attributes = self._string_list(mix_result.get("new_attributes"), agent.attributes)
+        agent.skills = self._string_list(mix_result.get("new_skills"), agent.skills)
         agent.context_memory = self._trim_context_memory(old_context)
         agent.solved_parent_question = False
         # Hard agent keeps the same question for the next epoch

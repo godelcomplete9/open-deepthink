@@ -637,7 +637,7 @@ if __name__ == "__main__":
     p.add_argument("--prompt", "-p", required=True)
     p.add_argument("--provider", choices=["openrouter", "llamacpp"], default="openrouter")
     p.add_argument("--api-key", default=None)
-    p.add_argument("--model", default="stepfun/step-3.5-flash:free")
+    p.add_argument("--model", default="nvidia/nemotron-3-ultra-550b-a55b:free")
     p.add_argument("--base-url", default="http://localhost:8080/v1")
     p.add_argument("--n", type=int, default=4)
     p.add_argument("--temperature-scale", type=float, default=1.3)

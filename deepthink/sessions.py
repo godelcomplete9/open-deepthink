@@ -12,6 +12,8 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from deepthink.utils import strip_secrets
+
 logger = logging.getLogger(__name__)
 
 _SKIP_KEYS = frozenset(
@@ -72,6 +74,8 @@ class SessionStore(dict):
         try:
             self.persist_dir.mkdir(parents=True, exist_ok=True)
             payload = _json_safe(value)
+            if "params" in payload:
+                payload["params"] = strip_secrets(payload["params"])
             path = self.persist_dir / f"{session_id}.json"
             path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
         except Exception as exc:

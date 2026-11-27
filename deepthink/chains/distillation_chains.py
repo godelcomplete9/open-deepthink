@@ -188,7 +188,7 @@ def get_mixing_chain(llm, density=1.0):
     """
     Creates a new agent system prompt by mixing two parent agents.
     """
-    prompt = ChatPromptTemplate.from_template(f"""
+    prompt = ChatPromptTemplate.from_template("""
 <System>
 You are a Mixing Agent.
 Your goal is to spawn a new "Child" agent by combining the attributes of two "Parent" agents.
@@ -198,12 +198,12 @@ The Child should inherit the context/memory of Parent A but possess a new, evolv
 
 <Parents>
 Parent A (Struggled):
-Attributes: {{parent_a_attributes}}
-System Prompt: {{parent_a_prompt}}
+Attributes: {parent_a_attributes}
+System Prompt: {parent_a_prompt}
 
 Parent B (Helper):
-Attributes: {{parent_b_attributes}}
-System Prompt: {{parent_b_prompt}}
+Attributes: {parent_b_attributes}
+System Prompt: {parent_b_prompt}
 </Parents>
 
 <Instruction>
@@ -222,7 +222,7 @@ Return a JSON object:
   "new_skills": ["skill1", "skill2", ...]
 }}
 </OutputFormat>
-""")
+""").partial(density=str(density))
     return prompt | llm | StrOutputParser()
 
 
