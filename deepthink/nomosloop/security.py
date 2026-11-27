@@ -384,8 +384,9 @@ def contradictions(lattice: dict[str, Any]) -> list[tuple[str, str, float]]:
     out = []
     for i, (la, ra, a) in enumerate(cl):
         for lb, rb, b in cl[i + 1 :]:
-            c = tc.contradiction(str(a.get("rewrite", "")), str(b.get("rewrite", "")))
-            if c > 0:
+            ta, tb = str(a.get("rewrite", "")), str(b.get("rewrite", ""))
+            c = tc.contradiction(ta, tb)
+            if c > 0 and not (tc.excepted(ta, rb) or tc.excepted(tb, ra)):
                 out.append((f"pol/{la}/{ra}", f"pol/{lb}/{rb}", c))
     return out
 

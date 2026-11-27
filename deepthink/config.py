@@ -218,6 +218,11 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("RSI_LORA_TRAIN_CMD", "rsi_lora_train_cmd"),
         description="Server-side LoRA trainer command ({dataset} {spec} {out_dir} {run_id}); never taken from the web UI",
     )
+    rsi_repo_roots: str = Field(
+        default="",
+        validation_alias=AliasChoices("RSI_REPO_ROOTS", "rsi_repo_roots"),
+        description="Folders (os.pathsep-separated) under which the web UI may scan a repository; empty disables it",
+    )
 
     # --- Paths / state ---
     open_deepthink_root: str | None = Field(

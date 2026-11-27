@@ -2,7 +2,8 @@
 
 The artifact is an institution's security policy. Agent Mechanics agents
 stand for its clauses, the moduli that close each level, and every viable
-control operation. The loop alternates between two balances:
+control operation, plus the code and social-engineering facts read against
+the policy (``surface.py``: repository analysis and role-level procedures). The loop alternates between two balances:
 
 * **Leak (defensive).** An agent whose arriving current is not stored (its
   clauses clash, or its function is mis-mapped) heals in the lattice with a
@@ -22,23 +23,27 @@ Nodes:
                    ranks, ensembles, clashes                            (none)
   heal             leaking agents heal; findings in the policy        (driver)
   stock            stocking agents propose controls (posture-gated)   (driver)
+  evolve           active evolution (toggle): alternate universes bred
+                   with the treatise's operators, read as what-ifs     (none)
   lora             distil traces; clamp the adapter into the driver     (none)
   artifact_emit    hardened policy + findings report + NX-1 report      (none)
 
-Edges: ingest -> scale_induction -> correspond -> tick -> heal -> stock -> lora
+Edges: ingest -> scale_induction -> correspond -> tick -> heal -> stock -> evolve -> lora
        lora -> correspond while iteration < max_iterations, else artifact_emit -> END.
+       evolve passes straight through unless ``rsi_cfg["evolve"]["enabled"]``.
 """
 
 from __future__ import annotations
 
 import copy
+import hashlib
 import os
 from collections.abc import Callable
 from typing import Any
 
 from langgraph.graph import END, StateGraph
 
-from . import agents, security, wsp
+from . import agents, evolution, security, surface, wsp
 from . import correspondence as tc
 from . import lora as lora_mod
 from .mechanics import agent_name
@@ -55,6 +60,7 @@ TOPOLOGY: dict[str, Any] = {
         "tick",
         "heal",
         "stock",
+        "evolve",
         "lora",
         "artifact_emit",
     ],
@@ -64,11 +70,12 @@ TOPOLOGY: dict[str, Any] = {
         ["correspond", "tick"],
         ["tick", "heal"],
         ["heal", "stock"],
-        ["stock", "lora"],
+        ["stock", "evolve"],
+        ["evolve", "lora"],
     ],
     "entry": "ingest",
     "conditional": {"lora": {"to_correspond_if": "iteration < max_iterations else artifact_emit"}},
-    "version": "graph/v1-leak-stock-security",
+    "version": "graph/v2-leak-stock-evolve-security",
 }
 
 # Optional live observer (GUI / telemetry): observer(phase, node, state, update).
@@ -204,13 +211,22 @@ def correspond_node(state: NomosState) -> dict[str, Any]:
     lattice = dict(state.get("scale_lattice", {}))
     ops = viable_operations(lattice, int(cfg.get("mutators", 8)))
     nodes, edges = tc.lattice_ax(lattice, ops)
+    facts = list(state.get("surface_facts", []) or [])
+    if facts:  # code and social facts, read against the current policy
+        s_nodes, s_edges = surface.ax_nodes(facts, surface.link(facts, lattice), lattice)
+        nodes += s_nodes
+        edges += s_edges
     known = {r.ax_ref for r in world.rows if r.alive}
     fresh = [n for n in nodes if n.ref not in known]
+    # Code and procedure facts stay with the offline lexicon unless the caller opts in,
+    # so repository content and role descriptions are not sent to a remote mapper.
+    remote_ok = bool(cfg.get("surface_remote_mapping"))
+    to_map = [n for n in fresh if remote_ok or n.kind not in surface.KINDS]
     rl = list(state.get("routing_log", []) or [])
     mapped: dict[str, dict[str, Any]] = {}
     mapper_name = "offline-lexicon"
-    for i in range(0, len(fresh), 16):
-        got, r = tc.map_rows_llm(fresh[i : i + 16], call_llm)
+    for i in range(0, len(to_map), 16):
+        got, r = tc.map_rows_llm(to_map[i : i + 16], call_llm)
         rl.append(
             {
                 "agent": "toc_mapper",
@@ -231,12 +247,14 @@ def correspond_node(state: NomosState) -> dict[str, Any]:
     note = ""
     if fresh and (declared is None or float(declared) <= 70):
         note = " (mapper recommendation ARC-AGI-2 > 70 not declared)"
+    n_surf = sum(1 for n in nodes if n.kind in surface.KINDS)
+    surf = f" + {n_surf} code/social facts" if n_surf else ""
     return {
         "world": world,
         "ops_by_ref": {f"op/{o['id']}": o for o in ops},
         "routing_log": rl,
         "topology_log": [
-            f"correspond: {len(nodes)} policy elements, {len(fresh)} new rows "
+            f"correspond: {len(nodes) - n_surf} policy elements{surf}, {len(fresh)} new rows "
             f"({len(mapped)} by {mapper_name}), {res['born']} agents born, {res['tombstoned']} tombstoned{note}"
         ],
     }
@@ -268,15 +286,31 @@ def tick_node(state: NomosState) -> dict[str, Any]:
     }
 
 
+def _surface_index(state: NomosState) -> dict[str, dict[str, Any]]:
+    return {str(f.get("ref")): f for f in state.get("surface_facts", []) or []}
+
+
+def _surface_ref(world: World, agent_id: str) -> str:
+    """The code/social fact an agent stands for ('' for a policy agent)."""
+    for r in world.rows_of(agent_id):
+        if r.ax_ref.startswith(("code/", "soc/")):
+            return r.ax_ref
+    return ""
+
+
 def heal_node(state: NomosState) -> dict[str, Any]:
     """Leak: agents heal in the lattice; each heal becomes a finding on the policy."""
     cfg = _cfg(state)
     world = _world(state)
     _, budgets = drive_config(cfg.get("drive", "bal"), cfg.get("sensitivity"))
     budget = int(cfg.get("heal_budget") or budgets["heal_budget"])
-    leakers = sorted(
+    pool = sorted(
         (a for a in world.live().values() if a.state == "leak"), key=lambda a: (-a.L, a.id)
-    )[:budget]
+    )
+    # Code and social agents get their own budget, so they never crowd out the policy's clashes.
+    leakers = [a for a in pool if not _surface_ref(world, a.id)][:budget]
+    leakers += [a for a in pool if _surface_ref(world, a.id)][: max(2, budget)]
+    facts = _surface_index(state)
     rl = list(state.get("routing_log", []) or [])
     buf = list(state.get("lora_buffer", []) or [])
     healed = 0
@@ -323,6 +357,23 @@ def heal_node(state: NomosState) -> dict[str, Any]:
             if not r["offline"]:
                 note = r["text"].strip()[:500]
                 world.rounds += 1
+        fact = facts.get(_surface_ref(world, a.id))
+        if not note and fact:
+            linked = [
+                x
+                for f in mine
+                for x in (f.a1, f.a2)
+                if x != fact["ref"] and not x.startswith(("code/", "soc/"))
+            ]
+            clause = next((x for x in linked if "#mod" not in x), "")
+            if clause:
+                note = (
+                    f"{fact['statement']} This contradicts {clause.split('/')[-1]}"
+                    f"{_clause(world.ax[clause].text if clause in world.ax else '')}. "
+                    f"Remediation: {fact['remediation']}"
+                )
+            else:
+                note = f"{fact['statement']} No clause of the policy covers this. Remediation: {fact['remediation']}"
         if not note:
             if mine:
                 f = mine[0]
@@ -409,6 +460,7 @@ def stock_node(state: NomosState) -> dict[str, Any]:
     if levels and "L1" not in levels:
         lattice = security.ensure_controls_level(lattice)
     target_level = "L1" if levels else ""
+    facts = _surface_index(state)
     stockers = sorted(
         (a for a in world.live().values() if a.state == "stock"), key=lambda a: (-a.dw_hat, a.id)
     )[:budget]
@@ -420,7 +472,12 @@ def stock_node(state: NomosState) -> dict[str, Any]:
         ax_ref = rows[0].ax_ref
         node = world.ax.get(ax_ref)
         before = security.posture(lattice)
-        if a.op and ax_ref in ops_by_ref:  # an operation agent adds its own function
+        fact = facts.get(_surface_ref(world, a.id))
+        if fact:  # a code or social gap: the repair becomes a control in the policy
+            op = "sigma"
+            fn = fact.get("species") if fact.get("species") in security.FUNCTION else "Ti"
+            text = str(fact.get("remediation", "")).rstrip(".") + f" ({fact.get('title', '')})."
+        elif a.op and ax_ref in ops_by_ref:  # an operation agent adds its own function
             fn = ops_by_ref[ax_ref]["function"]
             op = "sigma"
             text = security.function_control(
@@ -548,6 +605,113 @@ def stock_node(state: NomosState) -> dict[str, Any]:
     }
 
 
+def evolve_node(state: NomosState) -> dict[str, Any]:
+    """Active evolution (toggle): alternate universes bred in the lattice, read as what-ifs."""
+    cfg = _cfg(state)
+    ecfg = evolution.EvolveConfig.from_dict(cfg.get("evolve"))
+    if not ecfg.enabled:
+        return {"topology_log": ["evolve: off"]}
+    world = _world(state)
+    loop = int(state.get("iteration", 0)) + 1
+    hist = list(state.get("evolution", []) or [])
+    leaking = sum(1 for a in world.live().values() if a.state == "leak")
+    if ecfg.trigger == "calm" and leaking:
+        hist.append(
+            {"loop": loop, "skipped": f"{leaking} agents leak", "universes": [], "probes": []}
+        )
+        return {
+            "world": world,
+            "evolution": hist,
+            "topology_log": [f"evolve: skipped, {leaking} agents leak (trigger=calm)"],
+        }
+    lattice: dict[str, Any] = copy.deepcopy(dict(state.get("scale_lattice", {})))
+    if ecfg.seed is not None:
+        seed = ecfg.seed + loop - 1
+    else:
+        digest = hashlib.sha256(f"{state.get('law_hash', '')}:{loop}".encode()).hexdigest()
+        seed = int(digest[:8], 16)
+    out = evolution.evolve(
+        world,
+        lattice,
+        list(state.get("surface_facts", []) or []),
+        ecfg,
+        loop=loop,
+        seed=seed,
+        mutators=int(cfg.get("mutators", 8)),
+    )
+    cand = out.pop("candidate", None)
+    update: dict[str, Any] = {}
+    adopted = None
+    if ecfg.adopt == "gate" and cand:
+        new_lat = copy.deepcopy(cand["lattice"])
+        new_lat["version"] = _next_version(str(lattice.get("version", "v0")))
+        tag = f"rsi:evolve:{cand['id']}"
+        for lv in new_lat.get("levels", []) or []:
+            for r in lv.get("rules", []) or []:
+                ref = f"pol/{lv.get('level_id')}/{r.get('id')}"
+                if str(r.get("provenance", "")).startswith("evolve:") or ref in cand["replaced"]:
+                    r["provenance"] = tag
+        by_ref = {r.ax_ref: r.agent_id for r in world.rows if r.alive}
+        for new_ref, root in cand["roots"].items():
+            if root in by_ref:
+                world.pending_parent[new_ref] = by_ref[root]
+        nodes, _ = tc.lattice_ax(new_lat, [])
+        nmap = {n.ref: n for n in nodes}
+        for ref in cand["replaced"]:
+            if ref in nmap:
+                world.reproject(nmap[ref], "evolve-lexicon")
+        pos = security.posture(new_lat)
+        update = {
+            "scale_lattice": new_lat,
+            "lattice_history": [
+                *(state.get("lattice_history", []) or []),
+                copy.deepcopy(new_lat),
+            ],
+            "posture_history": [
+                *(state.get("posture_history", []) or []),
+                {
+                    "version": new_lat["version"],
+                    "iteration": loop,
+                    "source": f"evolve:{cand['id']}",
+                    **pos,
+                },
+            ],
+        }
+        adopted = cand["id"]
+        world.event(
+            "adopt",
+            by_ref.get(cand["roots"].get(next(iter(cand["roots"]), ""), ""), "I1"),
+            f"adopt({cand['id']}) => policy {new_lat['version']} posture {pos['score']:.3f}",
+            universe=cand["id"],
+        )
+    out["adopted"] = adopted
+    for u in out["universes"][:6] + out["probes"]:
+        ops = " ".join(f"{m['symbol']}@{m['site'].split('/')[-1]}" for m in u["mutations"])
+        world.event(
+            "branch",
+            u["mutations"][0]["agent"],
+            f"branch({u['id']}: {ops}) => {u['verdict']} "
+            f"dP={u['delta']['posture']:+.3f} dL={u['delta']['L_G']:+.3f}",
+            universe=u["id"],
+        )
+    buf = list(state.get("lora_buffer", []) or [])
+    for u in out["universes"][:3] + out["probes"][:1]:
+        answer = f"{u['verdict']}: " + ("; ".join(u["consequences"][:5]) or "no measurable change")
+        buf.append(
+            lora_mod.example("evolve", f"Policy {lattice.get('version')}. {u['what_if']}", answer)
+        )
+    hist.append(out)
+    best = out["universes"][0] if out["universes"] else None
+    line = (
+        f"evolve: {len(out['universes'])} universes over {len(out['survivors'])} generations, "
+        f"{len(out['probes'])} ω probes (seed {seed})"
+    )
+    if best:
+        line += f"; best {best['id']} ({best['verdict']}, fitness {best['fitness']:.2f}): {best['what_if'][:90]}"
+    line += f"; adopted: {adopted or 'none'}"
+    return {"world": world, "evolution": hist, "lora_buffer": buf, "topology_log": [line], **update}
+
+
 def lora_node(state: NomosState) -> dict[str, Any]:
     cfg = _cfg(state)
     world = _world(state)
@@ -643,6 +807,7 @@ def security_report(state: NomosState, world: World) -> str:
     first, last = (post[0], post[-1]) if post else ({}, {})
     controls = state.get("controls", []) or []
     findings = sorted(world.inspections, key=lambda x: -x.get("severity", 0.0))
+    facts_n = len(state.get("surface_facts", []) or [])
     lines = [
         f"# Hardened policy: {state.get('law_title', 'policy')}",
         "",
@@ -651,6 +816,11 @@ def security_report(state: NomosState, world: World) -> str:
         f"- Posture: {first.get('score', 0):.3f} → **{last.get('score', 0):.3f}** "
         f"(function diversity {last.get('diversity', 0):.2f}, contradictory clause pairs {last.get('contradictions', 0)})",
         f"- Findings: {len(findings)} · controls kept: {len(controls)} · rolled back: {len(state.get('rollbacks', []) or [])}",
+        *(
+            [f"- Code and social-engineering facts read against the policy: {facts_n}"]
+            if facts_n
+            else []
+        ),
         f"- Agents: {len(world.live())} alive, {world.tombstones} tombstoned · ensembles: {len(world.ensembles)} · rounds per solve: {world.rounds_per_solve():.2f}",
         "",
         "Posture is bookkeeping over the policy text (diversity of covered security functions over contradictions). It does not certify that the institution is secure.",
@@ -686,6 +856,22 @@ def security_report(state: NomosState, world: World) -> str:
             tag = " **(RSI)**" if str(r.get("provenance", "")).startswith("rsi:") else ""
             lines.append(f"- {r.get('id')} {r.get('rewrite', '')}{tag}")
         lines.append("")
+    if lat.get("links"):
+        lines.append(
+            "_Links: "
+            + "; ".join(
+                f"{ln.get('from', '').split('/')[-1]} → {ln.get('to', '').split('/')[-1]} ({ln.get('kind')})"
+                for ln in lat["links"]
+            )
+            + "_"
+        )
+        lines.append("")
+    facts = list(state.get("surface_facts", []) or [])
+    if facts or state.get("surface_meta"):
+        rows = surface.register(facts, surface.link(facts, lat))
+        lines += surface.report_lines(rows, dict(state.get("surface_meta") or {}))
+    if state.get("evolution"):
+        lines += evolution.report_lines(list(state.get("evolution") or []))
     if last.get("functions"):
         lines += [
             "## Function coverage",
@@ -714,6 +900,7 @@ def build_graph():
         ("tick", tick_node),
         ("heal", heal_node),
         ("stock", stock_node),
+        ("evolve", evolve_node),
         ("lora", lora_node),
         ("artifact_emit", artifact_emit_node),
     ):
@@ -740,9 +927,17 @@ def run_pipeline(
     mutators: int | None = None,
     rsi_cfg: dict[str, Any] | None = None,
     lora_cfg: dict[str, Any] | None = None,
+    surface_facts: list[dict[str, Any]] | None = None,
+    surface_meta: dict[str, Any] | None = None,
 ) -> NomosState:
-    """Run the loop. ``mutators=0`` instantiates no operation agents (baseline)."""
+    """Run the loop. ``mutators=0`` instantiates no operation agents (baseline).
+
+    ``surface_facts`` are code and social-engineering facts (``repo.py``,
+    ``social.py``); they become agents beside the policy's own.
+    """
     state = new_run_state(raw_text, law_title=law_title, max_iterations=max_iterations)
+    state["surface_facts"] = [dict(f) for f in surface_facts or []]
+    state["surface_meta"] = dict(surface_meta or {})
     cfg = dict(rsi_cfg or {})
     if mutators is not None:
         cfg["mutators"] = int(mutators)

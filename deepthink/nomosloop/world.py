@@ -17,6 +17,7 @@ measured posture improves).
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import math
 from dataclasses import dataclass, field
@@ -136,6 +137,35 @@ class World:
         }
         self.events.append(ev)
         return ev
+
+    def fork(self) -> World:
+        """An independent copy for an alternate universe; its logs start empty."""
+        light = {"events": [], "inspections": [], "coverage_history": []}
+        saved = {k: getattr(self, k) for k in light}
+        try:
+            for k, v in light.items():
+                setattr(self, k, v)
+            twin = copy.deepcopy(self)
+        finally:
+            for k, v in saved.items():
+                setattr(self, k, v)
+        return twin
+
+    def reproject(self, node: tc.AXNode, mapper: str = "offline-lexicon") -> None:
+        """Re-map an element whose text changed. The agent and its id persist (ev_i)."""
+        self.ax[node.ref] = node
+        data = tc.offline_row(node)
+        for r in self.rows:
+            if not r.alive or r.ax_ref != node.ref:
+                continue
+            r.p = list(data["p"])
+            r.evidence = dict(data.get("evidence") or {})
+            r.basis = list(data.get("basis") or [])
+            r.conf = float(data.get("conf", 0.5))
+            r.mapper = mapper
+            ag = self.agents.get(r.agent_id)
+            if ag is not None:
+                r.A = tc.link_phase(r.p, ag.w_eff())
 
     # ------------------------------------------------------------ root
     def ensure_root(self, law_text: str) -> Agent:

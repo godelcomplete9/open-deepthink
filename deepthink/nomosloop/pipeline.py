@@ -20,6 +20,19 @@ Model roles:
   above 70 on ARC-AGI-2 is recommended. Declare its score with
   ``params["mapper_arc_agi2"]`` (it is recorded, not verified).
 
+Artifacts beside the policy (optional):
+
+* ``params["repo_path"]``: a local repository or file. Its code and
+  configuration are scanned (``repo.py``) and every security fact is read
+  against the policy, so code that does what a clause forbids becomes a
+  finding.
+* ``params["social_profile"]``: a role-level profile of the institution's
+  procedures (``social.py``), for the social-engineering layer. It needs an
+  ``authorization`` block; personal and psychometric data is not admitted.
+
+Their facts are mapped offline unless ``params["surface_remote_mapping"]``
+is true, so repository content does not reach a remote mapper by default.
+
 With ``llm=None`` or ``offline=True`` everything runs on deterministic
 offline heuristics, keyless.
 """
@@ -33,6 +46,7 @@ import traceback
 from collections.abc import Callable
 from typing import Any
 
+from . import evolution, repo, social, surface
 from .graph import describe_topology, run_pipeline, set_observer
 from .routing import is_local_llm, llm_endpoint
 from .world import World
@@ -62,7 +76,36 @@ def default_rsi_params() -> dict[str, Any]:
         "lora": {},  # LoraConfig fields + "program": {enabled, adapter_ids, allow_negative, sample}
         "mapper_arc_agi2": None,  # declared ARC-AGI-2 score of the mapper
         "require_local_driver": True,
+        "repo_path": "",  # local repository or file to analyse beside the policy
+        "social_profile": None,  # role-level profile (dict, JSON text or .json path)
+        "surface_remote_mapping": False,  # send code/social facts to a remote mapper
+        # active evolution (evolution.EvolveConfig): {enabled, universes, generations, keep,
+        # ticks, probes, trigger: always|calm, adopt: none|gate, seed}
+        "evolve": {},
     }
+
+
+def collect_surface(
+    raw_text: str, repo_path: str = "", social_profile: Any = None
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Scan the repository and analyse the social profile. Raises ValueError on bad input."""
+    facts: list[dict[str, Any]] = []
+    meta: dict[str, Any] = {}
+    if repo_path:
+        try:
+            scan = repo.scan_repository(str(repo_path))
+        except FileNotFoundError as e:
+            raise ValueError(f"repository not found: {repo_path!r}") from e
+        facts += [f.as_dict() for f in scan.facts]
+        meta["code"] = scan.meta()
+    if social_profile not in (None, "", {}):
+        try:
+            soc_facts, soc_meta = social.analyze(social_profile, raw_text)
+        except (social.SocialProfileError, json.JSONDecodeError, OSError) as e:
+            raise ValueError(f"social profile: {e}") from e
+        facts += [f.as_dict() for f in soc_facts]
+        meta["social"] = soc_meta
+    return facts, meta
 
 
 def _make_bridge(llm):
@@ -125,6 +168,7 @@ def snapshot_state(state: dict[str, Any]) -> dict[str, Any]:
         "lora": lst.as_dict() if hasattr(lst, "as_dict") else {},
         "iteration": int(state.get("iteration", 0) or 0),
         "max_iterations": int(state.get("max_iterations", 1) or 1),
+        "evolution": evolution.compact(list(state.get("evolution", []) or [])),
         **w,
     }
 
@@ -140,6 +184,25 @@ def _summary(state: dict[str, Any], world: World | None) -> str:
         f"- findings: {len(world.inspections) if world else 0} · controls kept: "
         f"{len(state.get('controls', []) or [])} · rolled back: {len(state.get('rollbacks', []) or [])}",
     ]
+    facts = list(state.get("surface_facts", []) or [])
+    if facts:
+        rows = surface.register(facts, surface.link(facts, state.get("scale_lattice") or {}))
+        by = {k: sum(1 for r in rows if r["kind"] == k) for k in surface.KINDS}
+        contra = sum(1 for r in rows if r["status"] == "contradicts")
+        lines.append(
+            f"- code facts: {by['code']} · social-engineering facts: {by['social']} · "
+            f"contradicting the policy: {contra} · not covered: "
+            f"{sum(1 for r in rows if r['status'] == 'uncovered')}"
+        )
+    evo = [r for r in state.get("evolution", []) or [] if r.get("universes")]
+    if evo:
+        n = sum(len(r["universes"]) for r in evo)
+        best = max((u for r in evo for u in r["universes"]), key=lambda u: u["fitness"])
+        adopted = [r["adopted"] for r in evo if r.get("adopted")]
+        lines.append(
+            f"- universes: {n} over {len(evo)} loops · best {best['id']} ({best['verdict']}) · "
+            f"adopted: {', '.join(adopted) or 'none'}"
+        )
     if world:
         lines.append(
             f"- agents: {len(world.live())} alive · ensembles: {len(world.ensembles)} · "
@@ -218,7 +281,12 @@ async def run_rsi_pipeline(
         "objective": str(p.get("objective") or ""),
         "cot": bool(p.get("cot", True)),
         "mapper_arc_agi2": p.get("mapper_arc_agi2"),
+        "surface_remote_mapping": bool(p.get("surface_remote_mapping", False)),
+        "evolve": evolution.EvolveConfig.from_dict(p.get("evolve")).as_dict(),
     }
+    surface_facts, surface_meta = await asyncio.to_thread(
+        collect_surface, raw_text, str(p.get("repo_path") or ""), p.get("social_profile")
+    )
     lora_cfg = dict(p.get("lora") or {})
     if lora_cfg.get("enabled") and not lora_cfg.get("base_url") and llm is not None:
         url = llm_endpoint(llm)
@@ -261,6 +329,19 @@ async def run_rsi_pipeline(
         f"--- [RSI] security loop: title={p['law_title']!r} chars={len(raw_text)} iterations={p['iterations']} "
         f"drive={drive} λ_AM={rsi_cfg['lambda_am']} offline={offline} driver={driver_desc} mapper={mapper_desc} editor={editor_desc} ---"
     )
+    if "code" in surface_meta:
+        c = surface_meta["code"]
+        await _log(
+            f"  · repository: {c['files_scanned']} files scanned, {c['facts']} code facts "
+            f"({', '.join(f'{k}×{v}' for k, v in sorted(c['by_rule'].items())) or 'none'})"
+        )
+    if "social" in surface_meta:
+        s = surface_meta["social"]
+        dropped = f"; not admitted: {len(s['dropped'])} fields" if s["dropped"] else ""
+        await _log(
+            f"  · social engineering: {s['roles']} roles, {s['facts']} facts "
+            f"(authorized by {s['authorized_by']}){dropped}"
+        )
 
     def _observer(phase: str, node: str, state: dict, update: dict | None) -> None:
         if on_event is None:
@@ -299,6 +380,8 @@ async def run_rsi_pipeline(
                 mutators=int(p["mutators"]),
                 rsi_cfg=rsi_cfg,
                 lora_cfg=lora_cfg,
+                surface_facts=surface_facts,
+                surface_meta=surface_meta,
             )
         finally:
             if on_event is not None:
@@ -318,6 +401,7 @@ async def run_rsi_pipeline(
         lat = state.get("scale_lattice", {}) or {}
         post = state.get("posture_history", []) or []
         lst = state.get("lora_state")
+        discrepancies = surface.register(surface_facts, surface.link(surface_facts, lat))
         result = {
             "mode": "rsi",
             "domain": "cybersecurity",
@@ -348,6 +432,9 @@ async def run_rsi_pipeline(
             "events": world.events if world else [],
             "coverage": world.coverage_history if world else [],
             "rounds_per_solve": round(world.rounds_per_solve(), 4) if world else 0.0,
+            "surface": surface_meta,
+            "discrepancies": discrepancies,
+            "evolution": state.get("evolution", []) or [],
             "lora": lst.as_dict() if hasattr(lst, "as_dict") else {},
             "iteration": int(state.get("iteration", 0) or 0),
             "artifact_path": state.get("artifact_path", ""),

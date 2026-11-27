@@ -1,0 +1,39 @@
+{
+  "institution": "Example institution (illustrative)",
+  "authorization": {"by": "Chief Information Security Officer", "scope": "help desk and accounts payable procedures", "date": "2026-11-27"},
+  "reporting_channel": false,
+  "phishing_simulation": false,
+  "procedures": [
+    "Requests marked urgent by an executive are handled the same day."
+  ],
+  "roles": [
+    {
+      "role": "help desk",
+      "headcount": 6,
+      "channels": ["phone", "chat"],
+      "can": ["reset passwords", "enroll MFA devices", "unlock accounts"],
+      "verification": ["employee id", "date of birth"],
+      "public_exposure": true,
+      "training": "none"
+    },
+    {
+      "role": "accounts payable",
+      "headcount": 3,
+      "channels": ["email"],
+      "can": ["change vendor bank details", "release payments"],
+      "approvals": 1,
+      "verification": [],
+      "training": "annual"
+    },
+    {
+      "role": "reception",
+      "channels": ["in person", "phone"],
+      "can": ["issue visitor badges"],
+      "verification": ["photo id in person"],
+      "training": "annual"
+    }
+  ],
+  "people": [
+    {"name": "(any individual)", "mbti": "ENFP", "big_five": {"openness": 0.8}, "biography": "dropped before analysis"}
+  ]
+}

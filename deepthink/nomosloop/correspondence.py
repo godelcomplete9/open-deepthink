@@ -265,12 +265,29 @@ def project_text(
     return [s / tot for s in scores], evidence
 
 
+_PRECEDENCE = re.compile(
+    r"[,;]?\s*\b(?:except where|except as provided in|unless)\s+§[\w.·×]+(?:\s+applies)?", re.I
+)
+
+
 def polarity(text: str) -> int:
-    """+1 permissive, -1 restrictive, 0 neutral. Restrictive modals weigh 1.5."""
-    low = " " + text.lower() + " "
+    """+1 permissive, -1 restrictive, 0 neutral. Restrictive modals weigh 1.5.
+
+    An explicit precedence ("except where §7 applies") names another clause; it
+    does not change what this one permits or forbids, so it is not counted.
+    """
+    low = " " + _PRECEDENCE.sub("", text).lower() + " "
     pos = sum(low.count(w) for w in POSITIVE)
     neg = 1.5 * sum(low.count(w) for w in NEGATIVE)
     return 1 if pos > neg else -1 if neg > pos else 0
+
+
+def excepted(text: str, other_id: str) -> bool:
+    """An explicit precedence ("except where §7 applies", "unless §7") settles a clash."""
+    if not other_id:
+        return False
+    rx = rf"\b(?:except where|except as provided in|unless)\s+{re.escape(other_id)}(?![\w.·×])"
+    return re.search(rx, text, re.I) is not None
 
 
 def contradiction(a: str, b: str) -> float:
@@ -296,7 +313,7 @@ def contradiction(a: str, b: str) -> float:
 @dataclass
 class AXNode:
     ref: str
-    kind: str  # law | level | rule | modulus | operation | code
+    kind: str  # law | level | rule | modulus | operation | code | social
     text: str
     attrs: dict[str, Any] = field(default_factory=dict)
 
@@ -330,8 +347,17 @@ def lattice_ax(
     for i, a in enumerate(rule_nodes):
         for b in rule_nodes[i + 1 :]:
             c = contradiction(a.text, b.text)
-            if c > 0:
+            if c > 0 and not (
+                excepted(a.text, str(b.attrs.get("rule", "")))
+                or excepted(b.text, str(a.attrs.get("rule", "")))
+            ):
                 edges.append((a.ref, b.ref, math.pi * c))
+    # declared relations (stems, rings, standards bred by active evolution)
+    refs = {n.ref for n in nodes}
+    for ln in lattice.get("links", []) or []:
+        s, d = str(ln.get("from", "")), str(ln.get("to", ""))
+        if s in refs and d in refs and s != d:
+            edges.append((s, d, 0.0))
     for op in ops:
         ref = f"op/{op['id']}"
         nodes.append(
@@ -409,10 +435,16 @@ KIND_PRIOR: dict[str, dict[str, float]] = {
 
 
 def offline_row(node: AXNode) -> dict[str, Any]:
-    p, ev = project_text(node.text, KIND_PRIOR.get(node.kind))
+    prior = dict(KIND_PRIOR.get(node.kind) or {})
+    sp = node.attrs.get("species")
+    if sp in SPECIES:  # code and social facts carry the function they touch
+        prior[sp] = prior.get(sp, 0.0) + 2.0
+    p, ev = project_text(node.text, prior)
     top = sorted(range(8), key=lambda i: -p[i])[:3]
     basis = [VERBS[SPECIES[i]] for i in top if p[i] > 0.05]
     why = {
+        "code": "what actually runs; a discrepancy with a clause is a leak in practice",
+        "social": "a procedure run by people; a gap is a social-engineering path",
         "modulus": "closes a scale; energy only by traversal of its rules",
         "rule": "a clause entrusted by the institution; pattern without own intake",
         "operation": "a viable control operation; prosthesis energised by its licensing agent",

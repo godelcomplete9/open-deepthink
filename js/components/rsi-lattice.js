@@ -4,8 +4,8 @@
  * A flat line drawing: hairlines, solid dots, one accent colour for the loop's
  * progress, and red / green only where they mean leak / stock.
  *
- *   • Ring   = the loop. The five looping stages (correspond, tick, heal,
- *              stock, lora) sit on a circle; ingest and scale induction
+ *   • Ring   = the loop. The six looping stages (correspond, tick, heal,
+ *              stock, evolve, lora) sit on a circle; ingest and scale induction
  *              spiral into it as a tail. A dot travels the ring and the
  *              accent arc shows how far the current pass has gone.
  *   • AX band (outer)   = the security policy: clauses grouped by level
@@ -28,7 +28,7 @@
 const RsiLattice = (() => {
     'use strict';
 
-    const LOOP = ['correspond', 'tick', 'heal', 'stock', 'lora'];
+    const LOOP = ['correspond', 'tick', 'heal', 'stock', 'evolve', 'lora'];
     const TAIL = ['ingest', 'scale_induction'];
     const STAGE_META = {
         ingest: { label: 'ingest', hint: 'tokenising the policy' },
@@ -37,6 +37,7 @@ const RsiLattice = (() => {
         tick: { label: 'tick', hint: 'the Agent Mechanics tick law · flux, Leak, stock, ranks, ensembles' },
         heal: { label: 'heal', hint: 'leaking agents heal with licensed operators → findings' },
         stock: { label: 'stock', hint: 'surplus becomes controls · kept only if posture improves' },
+        evolve: { label: 'evolve', hint: 'active evolution (when on): alternate universes bred by the treatise operators, each a what-if on the policy' },
         lora: { label: 'lora', hint: 'distil the traces · clamp the adapter when the loop improves' },
         artifact_emit: { label: 'report', hint: 'hardened policy, findings and the NX-1 log' },
     };
